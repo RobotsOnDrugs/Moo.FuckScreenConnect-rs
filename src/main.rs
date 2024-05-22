@@ -38,7 +38,6 @@ use windows::Win32::UI::WindowsAndMessaging::SetWindowLongPtrW;
 use windows::Win32::UI::WindowsAndMessaging::WINDOW_EX_STYLE;
 use windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE;
 use windows::Win32::UI::WindowsAndMessaging::WS_EX_LAYERED;
-use windows::Win32::UI::WindowsAndMessaging::WS_EX_TOPMOST;
 use windows::Win32::UI::WindowsAndMessaging::WS_VISIBLE;
 
 const DEFAULT_OPACITY: isize = 50;
@@ -49,8 +48,8 @@ static SHOULD_CONTINUE: Lazy<Mutex<bool>> = Lazy::new(|| return Mutex::new(true)
 
 fn main()
 {
-	info!("Starting.");
 	TermLogger::init(LevelFilter::Info, Config::default(), TerminalMode::Stdout, ColorChoice::Always).unwrap();
+	info!("Starting.");
 	ctrlc::set_handler(||
 		{
 			info!("Received Ctrl-C signal.");
@@ -61,7 +60,7 @@ fn main()
 	let opacity = isize::from_str(arg.as_str()).unwrap_or(DEFAULT_OPACITY);
 	let opacity = match opacity
 	{
-		1..=99 => opacity,
+		0..=100 => opacity,
 		_ => DEFAULT_OPACITY
 	};
 	info!("Opacity is set to {}%.", opacity);
@@ -82,8 +81,9 @@ unsafe extern "system" fn fsc(param0: HWND, param1: LPARAM) -> BOOL
 	let style = WINDOW_STYLE(style as u32);
 	let ex_style = GetWindowLongPtrW(param0, GWL_EXSTYLE);
 	let ex_style = WINDOW_EX_STYLE(ex_style as u32);
-	if style != (style | WS_VISIBLE) { return BOOL::from(true); }
-	if ex_style != (ex_style | WS_EX_TOPMOST) { return BOOL::from(true); }
+	let is_layered = ex_style == (ex_style | WS_EX_LAYERED);
+	let is_visible = style == (style | WS_VISIBLE);
+	if !is_visible && !is_layered { return BOOL::from(false); }
 	let mut pid = u32::default();
 	let _ = GetWindowThreadProcessId(param0, Some(&mut pid));
 	let process_handle = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, BOOL::from(false), pid)
@@ -99,7 +99,7 @@ unsafe extern "system" fn fsc(param0: HWND, param1: LPARAM) -> BOOL
 	if process_name != SCREENCONNECT_MODULE_NAME { return BOOL::from(true); }
 	let new_ex_style = ex_style | WS_EX_LAYERED;
 	let _ = SetWindowLongPtrW(param0, GWL_EXSTYLE, new_ex_style.0 as isize);
-	let opacity = param1.0 as u32;
+	let opacity = param1.0;
 	let opacity = (255 * opacity / 100) as u8;
 	match SetLayeredWindowAttributes(param0, COLORREF::default(), opacity, LWA_ALPHA)
 	{
