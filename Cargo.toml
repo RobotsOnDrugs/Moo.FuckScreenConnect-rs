@@ -1,6 +1,6 @@
 [package]
 name = "moo_fuck_screen_connect"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 [dependencies]
@@ -10,5 +10,14 @@ simplelog = "0.12"
 log = "0.4"
 
 [dependencies.windows]
-version = "0.56.0"
-features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_System_Threading", "Win32_System_LibraryLoader", "Win32_System_ProcessStatus"]
+version = "0.57.0"
+features = [
+	"Win32_UI_WindowsAndMessaging",
+	"Win32_Foundation",
+	"Win32_System_Threading",
+	"Win32_System_LibraryLoader",
+	"Win32_System_Memory",
+	"Win32_System_ProcessStatus",
+	"Win32_System_StationsAndDesktops",
+	"Win32_Security",
+	"Win32_Security_Authentication_Identity"]
