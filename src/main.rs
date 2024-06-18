@@ -20,6 +20,7 @@ use simplelog::ColorChoice;
 use simplelog::Config;
 use simplelog::TerminalMode;
 use simplelog::TermLogger;
+use windows::core::imp::CloseHandle;
 
 use windows::Win32::Foundation::BOOL;
 use windows::Win32::Foundation::HANDLE;
@@ -83,7 +84,7 @@ fn main()
 	unsafe
 	{
 		// Some WIP code for an upcoming feature to check if it's running as SYSTEM in the interactive session
-		// Everything for this is inside the unsafe block and shouldn't affect the normal operation of the code so far 
+		// Everything for this is inside the unsafe block and shouldn't affect the normal operation of the code so far
 		let mut token_user_actual_size = u32::default();
 		let current_process_handle = GetCurrentProcess();
 		let mut token_handle = HANDLE::default();
@@ -93,11 +94,11 @@ fn main()
 		GetTokenInformation(token_handle, TokenUser, Some(process_token_hlocal.0), token_user_actual_size, &mut token_user_actual_size).unwrap();
 		let token_user = process_token_hlocal.0 as *const TOKEN_USER;
 		let user_sid = (*token_user).User.Sid;
-
+	
 		let is_system = IsWellKnownSid(user_sid, WinLocalSystemSid);
 		debug!("Is SYSTEM: {is_system:?}");
 		LocalFree(process_token_hlocal);
-
+	
 		let windowstation = GetProcessWindowStation().unwrap();
 		// let windowstation = OpenWindowStationW(w!("WinSta0"), false, 2u32).unwrap();
 		let mut obj_size = u32::default();
@@ -132,18 +133,31 @@ unsafe extern "system" fn fsc(hwnd: HWND, opacity: LPARAM) -> BOOL
 	let mut this_window_info = WINDOWINFO::default();
 	GetWindowInfo(hwnd, &mut this_window_info).unwrap();
 	let mut desktop_window_info = WINDOWINFO::default();
-	GetWindowInfo(GetDesktopWindow(), &mut desktop_window_info).unwrap();
-	if this_window_info.rcWindow.ne(&desktop_window_info.rcWindow) { return BOOL::from(true); }
+	let desktop_hwnd = GetDesktopWindow();
+	GetWindowInfo(desktop_hwnd, &mut desktop_window_info).unwrap();
+	let _ = CloseHandle(desktop_hwnd.0);
+
+	if this_window_info.rcWindow.ne(&desktop_window_info.rcWindow)
+	{
+		let _ = CloseHandle(hwnd.0);
+		return BOOL::from(true);
+	}
 	
 	let mut pid = u32::default();
 	let _ = GetWindowThreadProcessId(hwnd, Some(&mut pid));
 	let process_handle = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, BOOL::from(false), pid)
 	{
 		Ok(handle) => handle,
-		Err(err) => { warn!("{err}"); return BOOL::from(true); }
+		Err(err) =>
+		{
+			warn!("{err}");
+			let _ = CloseHandle(hwnd.0);
+			return BOOL::from(true);
+		}
 	};
 	let mut process_name: [u16; 256] = [0; 256];
 	let process_name_size = GetModuleFileNameExW(process_handle, None, &mut process_name);
+	let _ = CloseHandle(process_handle.0);
 	let process_name = &process_name[0..process_name_size as usize];
 	let process_name = String::from_utf16_lossy(process_name);
 	let process_name = process_name.split('\\').last().unwrap_or("");
@@ -151,10 +165,14 @@ unsafe extern "system" fn fsc(hwnd: HWND, opacity: LPARAM) -> BOOL
 	{
 		SCREENCONNECT_MODULE_NAME => "ScreenConnect Client",
 		REMOTE_UTILITIES_MODULE_NAME => "Remote Utilities",
-		_ => { return BOOL::from(true); }
+		_ => { let _ = CloseHandle(hwnd.0); return BOOL::from(true); }
 	};
 	let mut last_hwnd = HWND_PTR.lock().unwrap();
-	if last_hwnd.deref() == &hwnd.0 { return BOOL::from(false); }
+	if last_hwnd.deref() == &hwnd.0
+	{
+		let _ = CloseHandle(hwnd.0);
+		return BOOL::from(false);
+	}
 	let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
 	let style = WINDOW_STYLE(style as u32);
 	let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
@@ -172,5 +190,6 @@ unsafe extern "system" fn fsc(hwnd: HWND, opacity: LPARAM) -> BOOL
 		Err(err) => warn!("Failed to make the privacy window semi-transparent: screen {}", err)
 	}
 	*last_hwnd = hwnd.0;
+	let _ = CloseHandle(hwnd.0);
 	return BOOL::from(false);
 }
