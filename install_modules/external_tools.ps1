@@ -28,27 +28,24 @@ function Get-PsExec
 	$PsExecPath = Join-Path $PWD 'PSTools\PsExec.exe'
 
 	$valid_psexec_in_temp = $hash -eq $PsExecHash
-	switch ($valid_psexec_in_temp)
+	if ($valid_psexec_in_temp)
 	{
-		$true
-		{
-			Pop-Location
-			Copy-Item -Path $PsExecPath -Destination '.' -Force
-		}
-		$false
-		{
-			New-Item -Type Directory '.\PSTools' -Force | Out-Null
-			$psexec_url = "https://download.sysinternals.com/files/PSTools.zip"
-			$curl = $(Get-Command curl).Source
-			if ($null -ne $curl) { & $curl -k -s $psexec_url -o PSTools.zip }
-			else { Invoke-WebRequest -Uri $psexec_url -OutFile 'PSTools.zip' }
+		Pop-Location
+		Copy-Item -Path $PsExecPath -Destination '.' -Force
+	}
+	else
+	{
+		New-Item -Type Directory '.\PSTools' -Force | Out-Null
+		$psexec_url = "https://download.sysinternals.com/files/PSTools.zip"
+		$curl = $(Get-Command curl).Source
+		if ($null -ne $curl) { & $curl -k -s $psexec_url -o PSTools.zip }
+		else { Invoke-WebRequest -Uri $psexec_url -OutFile 'PSTools.zip' }
 
-			Expand-Archive -LiteralPath '.\PSTools.zip' -DestinationPath '.\PSTools' -Force | Out-Null
-			$psexec_exe_path = Join-Path $FscTempFolder 'PSTools\PsExec.exe'
-			Pop-Location
-			Copy-Item -Path $psexec_exe_path -Destination '.' -Force
-			$PsExecPath = Join-Path $PWD 'PsExec.exe'
-		}
+		Expand-Archive -LiteralPath '.\PSTools.zip' -DestinationPath '.\PSTools' -Force | Out-Null
+		$psexec_exe_path = Join-Path $FscTempFolder 'PSTools\PsExec.exe'
+		Pop-Location
+		Copy-Item -Path $psexec_exe_path -Destination '.' -Force
+		$PsExecPath = Join-Path $PWD 'PsExec.exe'
 	}
 	Remove-Item -Recurse $FscTempFolder -Force
 	return $PsExecPath

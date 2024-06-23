@@ -1,4 +1,3 @@
-#$InstallationKeyPath = 'HKLM:\SOFTWARE\Moo\NoBlockInput'
 $ScheduledTaskName = 'FSC Service Task'
 $InstallationKeyPath = 'HKLM:\SOFTWARE\Moo\FuckScreenConnect'
 $FileNames = @('moo_fuck_screen_connect.exe', 'moo_fuck_screen_connect_debug.exe')
@@ -20,11 +19,9 @@ function Get-Installation
 	catch [System.Management.Automation.ItemNotFoundException] { Write-Log -Level DEBUG -Message "Installation configuration is not set."; return $null }
 	catch
 	{
-		Write-Log -Level ERROR -Message "There was a non-recoverable error getting installation information: $($_.Exception.Message)"
-		Wait-Logging
-		exit
+		Stop-ScriptWithError -ErrorMessage "There was a non-recoverable error getting installation information: $($_.Exception.Message)"
 	}
-	if ($null -ne $keypath)
+	if ($keypath)
 	{
 		[Microsoft.Win32.RegistryKey]$keypath = $keypath
 		Write-Log -Level DEBUG -Message "Got keypath."
@@ -32,9 +29,7 @@ function Get-Installation
 	}
 	else
 	{
-		Write-Log -Level ERROR -Message "State for Get-Installation is likely invalid.";
-		Wait-Logging
-		exit
+		Stop-ScriptWithError -ErrorMessage "State for Get-Installation is likely invalid."
 	}
 }
 $InstallationKey = Get-Installation
@@ -56,7 +51,7 @@ function New-Installation
 	}
 
 	Remove-Item $install_path -Recurse -Force -ErrorAction SilentlyContinue | Out-Null
-	New-Item -Type Directory $install_path -Force | Out-Null
+	New-Item -Type Directory $install_path -Force -Confirm:$false | Out-Null
 	Get-PsExec | Out-Null
 	Move-Item 'PsExec.exe' $install_path
 	$psexec_path = Join-Path $install_path 'PsExec.exe'
@@ -65,17 +60,13 @@ function New-Installation
 		try { Copy-Item $file_name $install_path }
 		catch [System.Management.Automation.ItemNotFoundException]
 		{
-			Remove-Item $install_path -Force -ErrorAction SilentlyContinue | Out-Null
-			Write-Log -Level ERROR -Message "$file_name was not found in the current directory. Cannot continue."
-			Wait-Logging
-			exit
+			Remove-Item -Recurse $install_path -Force -ErrorAction SilentlyContinue | Out-Null
+			Stop-ScriptWithError -ErrorMessage "$file_name was not found in the current directory. Cannot continue."
 		}
 		catch
 		{
-			Remove-Item $install_path -Force -ErrorAction SilentlyContinue | Out-Null
-			Write-Log -Level ERROR -Message "Could not copy files: $(Error[0].Message). Cannot continue."
-			Wait-Logging
-			exit
+			Remove-Item -Recurse $install_path -Force -ErrorAction SilentlyContinue | Out-Null
+			Stop-ScriptWithError -ErrorMessage "Could not copy files: $(Error[0].Message). Cannot continue."
 		}
 	}
 	Write-Log -Level INFO -Message "Files copied to $install_path."
@@ -93,22 +84,19 @@ function New-Installation
 	}
 
 	$full_path = Join-Path $install_path 'moo_fuck_screen_connect.exe'
-	$task_action = New-ScheduledTaskAction -Execute $psexec_path -Argument "-s -i 1 -w $install_path $full_path" -WorkingDirectory $install_path
+	$task_action = New-ScheduledTaskAction -Execute $psexec_path -Argument "-s -i 1 -w `"$install_path`" `"$full_path`"" -WorkingDirectory "$install_path"
 	$task_settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -Compatibility Win8 -DontStopIfGoingOnBatteries -DontStopOnIdleEnd -Hidden -MultipleInstances IgnoreNew -RestartCount 3 -StartWhenAvailable -WakeToRun
 	$task_trigger = New-ScheduledTaskTrigger -AtLogon
 	$task_principal = New-ScheduledTaskPrincipal -LogonType S4U -RunLevel Highest -UserId (whoami)
 	Register-ScheduledTask -TaskName $ScheduledTaskName -Action $task_action -Principal $task_principal -Settings $task_settings -Trigger $task_trigger | Out-Null
 	Write-Log -Level INFO -Message "Scheduled task created."
-
 }
-
-
 
 function Get-FileInstallationStatus
 {
 	param([String]$install_path, [bool]$install)
 
-	if ($null -eq $(Get-Installation)) { return [ExistingInstallationStatus]::None }
+	if (-not $(Get-Installation)) { return [ExistingInstallationStatus]::None }
 	$expected_path_properties = @('InstallationPath', 'LogDirectory')
 	foreach ($property in $expected_path_properties)
 	{
@@ -121,11 +109,11 @@ function Get-FileInstallationStatus
 		if ($null -eq $(Get-Item $value -ErrorAction SilentlyContinue)) {return [ExistingInstallationStatus]::None }
 	}
 
-	if (($install_path.Length -eq 0)) { $install_path = $InstallationKey.GetValue('InstallationPath') }
+	if (-not $install_path) { $install_path = $InstallationKey.GetValue('InstallationPath') }
 	try { Get-Item $install_path -ErrorAction Stop }
 	catch
 	{
-		if ($install_path.Length -eq 0) { Write-Log -Level DEBUG -Message "No installation path was specified." }
+		if (-not $install_path) { Write-Log -Level DEBUG -Message "No installation path was specified." }
 		else { Write-Log -Level DEBUG -Message "$install_path missing." }
 		return [ExistingInstallationStatus]::None
 	}
@@ -133,7 +121,7 @@ function Get-FileInstallationStatus
 }
 function Get-ScheduledTaskInstallationStatus
 {
-	try { $task = Get-ScheduledTask -TaskName $ScheduledTaskName -ErrorAction Stop }
+	try { $null = Get-ScheduledTask -TaskName $ScheduledTaskName -ErrorAction Stop }
 	catch [Microsoft.PowerShell.Cmdletization.Cim.CimJobException]
 	{
 		if ($_.CategoryInfo.Category -eq [System.Management.Automation.ErrorCategory]::ObjectNotFound) { return [ExistingInstallationStatus]::None }
@@ -156,7 +144,7 @@ function Get-InstallationStatus
 	$files = Get-FileInstallationStatus $install_path $install
 	if ($files -eq [ExistingInstallationStatus]::Broken)
 	{
-		Write-Log -Level DEBUG -Message "Files broken.";
+		Write-Log -Level DEBUG -Message "Files broken."
 		return [ExistingInstallationStatus]::Broken
 	}
 	$task = Get-ScheduledTaskInstallationStatus
@@ -175,55 +163,53 @@ function Get-InstallationStatus
 function Install-Fsc
 {
 	param([String]$install_source, [String]$install_path, [Switch]$force)
-	Write-Log -Level INFO -Message "Installing to $install_path"
 	$status = Get-InstallationStatus $install_path $true
 	if ($status -eq [ExistingInstallationStatus]::Broken)
 	{
-		Write-Log -Level ERROR -Message "The existing installation is broken. Cannot continue. Please try forcibly uninstalling FSC or resolving any issues manually."
-		Wait-Logging
-		exit
+		Stop-ScriptWithError -Message "The existing installation is broken. Cannot continue. Please try forcibly uninstalling FSC or resolving any issues manually."
 	}
-	switch ($install_path)
+	if ($install_path)
 	{
-		""
+		Write-Log -Level INFO -Message "Installation location: ${install_path}."
+		switch ($status)
 		{
-			$error_message = switch ($status)
+			([ExistingInstallationStatus]::Normal)
 			{
-				([ExistingInstallationStatus]::None) { "No existing installation was found and no installation path was given. Cannot continue."; break }
-				default { "Invalid state when getting installation status. This is a bug."; break }
+				Write-Log -Level INFO -Message "FSC is already installed."
+				if ($Force) { Set-Installation $install_source $install_path $false }
+				return
 			}
-			Write-Log -Level ERROR -Message $error_message
-			Wait-Logging
-			exit
-		}
-		default
-		{
-			switch ($status)
+			([ExistingInstallationStatus]::None)
 			{
-				([ExistingInstallationStatus]::Normal)
-				{
-					Write-Log -Level INFO -Message "Installing from normal."
-					Write-Log -Level DEBUG -Message $force
-					if ($Force) { Set-Installation $install_source $install_path $false }
-					else { Set-Installation $install_source $install_path $true }
-					break
-				}
-				([ExistingInstallationStatus]::None)
-				{
-					Write-Log -Level INFO -Message "Installing from scratch."
-					Set-Installation $install_source $install_path $false
-					break
-				}
-				([ExistingInstallationStatus]::Update)
-				{
-					Write-Log -Level INFO -Message "Updating files."
-					Set-Installation $install_source $install_path $true
-					break
-				}
-				default { Write-Log -Level DEBUG -Message "Installation is broken." }
+				Write-Log -Level INFO -Message "Installing from scratch."
+				Set-Installation $install_source $install_path $false
+				break
 			}
+			([ExistingInstallationStatus]::Update)
+			{
+				Write-Log -Level INFO -Message "Updating files."
+				Set-Installation $install_source $install_path $true
+				break
+			}
+			default { "Installation is broken." }
 		}
 	}
+	else
+	{
+		switch ($status)
+		{
+			([ExistingInstallationStatus]::None) { Stop-ScriptWithError -ErrorMessage "No existing installation was found and no installation path was given. Cannot continue."; break }
+			{ (([ExistingInstallationStatus]::Normal) -or ([ExistingInstallationStatus]::Update)) }
+			{
+				$install_path = $InstallationKey.GetValue('InstallationPath')
+				Install-Fsc $install_source $install_path $force
+				break
+			}
+			([ExistingInstallationStatus]::Broken) { Stop-ScriptWithError -ErrorMessage "Installation is broken."; break }
+			default { Stop-ScriptWithError -ErrorMessage "Invalid state when getting installation status. This is a bug."; break }
+		}
+	}
+
 }
 function Uninstall-Fsc
 {
@@ -238,23 +224,22 @@ function Uninstall-Fsc
 	if ($FullUninstall -or ($status -eq [ExistingInstallationStatus]::Broken))
 	{
 		Write-Log -Level INFO -Message "Performing a full uninstallation of FSC."
+		if (-not $install_path) { $install_path = $InstallationKey.GetValue('InstallationPath') }
+		Unregister-ScheduledTask -TaskName "$ScheduledTaskName" -TaskPath "*\" -Confirm:$False -ErrorAction SilentlyContinue
+		Remove-Item -Recurse $install_path -Force -ErrorAction SilentlyContinue
 		Remove-Item -Recurse $InstallationKeyPath -Force -ErrorAction SilentlyContinue
-		Unregister-ScheduledTask -TaskName "$ScheduledTaskName" -TaskPath "*\" -Confirm:$False
-		try { Remove-Item -Recurse $install_path -Force -ErrorAction SilentlyContinue } catch {}
 		return
 	}
 	if ($status -eq [ExistingInstallationStatus]::Normal)
 	{
-		Write-Log -Level INFO -Message "Keeping current configuration and deleting old files."
-		Remove-Item -Recurse $install_path -Force -ErrorAction SilentlyContinue
-		return
+		if (-not $Force) { return }
+		$status = [ExistingInstallationStatus]::Update
 	}
 	if ($status -eq [ExistingInstallationStatus]::Update)
 	{
-		try { Remove-Item -Recurse $install_path -Force -ErrorAction SilentlyContinue } catch {}
+		Write-Log -Level INFO -Message "Keeping current configuration and updating files."
+		trap { Remove-Item -Recurse $install_path -Force -ErrorAction SilentlyContinue }
 		return
 	}
-	Write-Log -Level ERROR -Message "Installation state is undefined."
-	Wait-Logging
-	exit
+	Stop-ScriptWithError -ErrorMessage "Installation state is undefined."
 }

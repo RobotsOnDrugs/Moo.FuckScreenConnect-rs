@@ -1,4 +1,4 @@
-##Requires -RunAsAdministrator
+#Requires -RunAsAdministrator
 
 # There's a lot of null-passing and null-checking. This sucks, but I'm not sure how to better handle bad states in PowerShell.
 # It's a lot clunkier and awkward to pass around exceptions in PS than in C# or with Result<T> in Rust, but this script would probably take longer to write in Rust. >_>
@@ -53,7 +53,7 @@ Write-Log -Level DEBUG -Message "Running PowerShell $($PSVersionTable.PSVersion)
 Write-Log -Level DEBUG -Message 'FSC functions script run.'
 Write-Log -Level INFO -Message 'Starting.'
 
-if ($($InstallationPath.Length) -eq 0) { $install_path = $null }
+if (-not $InstallationPath) { $install_path = $null }
 else { $install_path = $InstallationPath }
 switch ($Type)
 {
@@ -61,7 +61,7 @@ switch ($Type)
 	{
 		Write-Log -Level INFO -Message "Installing FSC."
 		Uninstall-Fsc $Force $install_path
-		Install-Fsc $InstallationSource $install_path !$Force
+		Install-Fsc $InstallationSource $install_path $Force
 		break
 	}
 	'Uninstall'

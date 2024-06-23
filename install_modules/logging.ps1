@@ -1,7 +1,7 @@
 function Stop-ScriptWithError
 {
 	param([String]$ErrorMessage)
-	Write-Log -Level 'ERROR' -Message $ErrorMessage; Wait-Logging; exit
+	Write-Log -Level ERROR -Message $ErrorMessage; Wait-Logging; exit
 }
 
 $LoggingAvailable = Get-Module Logging
