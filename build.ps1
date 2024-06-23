@@ -43,6 +43,6 @@ foreach ($additional_output_dir in $AdditionalOutputDirs)
 	Copy-Item -Recurse '.' $additional_output_dir
 }
 $(Remove-Item -Force -Path test.7z -ErrorAction SilentlyContinue) | Out-Null
-7za a -t7z -m0=LZMA2 -mx9 -mmt8 -aoa "${name}.${version}.7z" * | Out-Null
-7za a -tzip -m0=Deflate64 -mpass=15 -mfb=256 -mx9 -mmt8 -aoa "${name}.${version}.zip" * | Out-Null
+7za a -t7z -m0=LZMA2 -mx9 -mmt8 -aoa "${name}.v${version}.7z" * | Out-Null
+7za a -tzip -m0=Deflate64 -mpass=15 -mfb=256 -mx9 -mmt8 -aoa "${name}.v${version}.zip" * | Out-Null
 Pop-Location
