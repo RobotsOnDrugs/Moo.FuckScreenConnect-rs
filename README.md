@@ -7,7 +7,6 @@ This is a port of the original formerly private program written in C# to Rust, m
 
 ## Planned features
 - Better and more thorough documentation.
-- Installation script including the creation of a scheduled task.
 - Build script for customizing the binaries' metadata and packaging them for release.
 - Support for other remote desktop software that uses a window for its privacy screen.
 
