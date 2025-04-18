@@ -66,7 +66,7 @@ function New-Installation
 		catch
 		{
 			Remove-Item -Recurse $install_path -Force -ErrorAction SilentlyContinue | Out-Null
-			Stop-ScriptWithError -ErrorMessage "Could not copy files: $(Error[0].Message). Cannot continue."
+			Stop-ScriptWithError -ErrorMessage "Could not copy files: $($Error[0].Message). Cannot continue."
 		}
 	}
 	Write-Log -Level INFO -Message "Files copied to $install_path."

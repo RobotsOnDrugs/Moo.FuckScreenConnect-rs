@@ -1,15 +1,27 @@
+// #![feature(strict_provenance)]
 #![deny(clippy::implicit_return)]
 #![allow(clippy::needless_return)]
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 
+mod service;
+mod process_state;
+
+use std::process;
 use std::env;
+use std::slice;
+use std::ffi::OsString;
 use std::ops::Deref;
+use std::os::windows::prelude::OsStringExt;
+use std::path::PathBuf;
 use std::process::exit;
 use std::str::FromStr;
 use std::sync::Mutex;
 use std::thread::sleep;
 use std::time::Duration;
-use log::debug;
+
+use anyhow::Result;
+
+use log::error;
 use log::info;
 use log::LevelFilter;
 use log::warn;
@@ -20,31 +32,18 @@ use simplelog::ColorChoice;
 use simplelog::Config;
 use simplelog::TerminalMode;
 use simplelog::TermLogger;
-use windows::core::imp::CloseHandle;
 
 use windows::Win32::Foundation::BOOL;
-use windows::Win32::Foundation::HANDLE;
-use windows::Win32::Foundation::LocalFree;
-use windows::Win32::Foundation::PSID;
+use windows::Win32::Foundation::CloseHandle;
+use windows::Win32::Foundation::MAX_PATH;
 use windows::Win32::Foundation::COLORREF;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Foundation::LPARAM;
-use windows::Win32::Security::GetTokenInformation;
-use windows::Win32::Security::IsWellKnownSid;
-use windows::Win32::Security::SID;
-use windows::Win32::Security::TOKEN_QUERY;
-use windows::Win32::Security::TOKEN_USER;
-use windows::Win32::Security::TokenUser;
-use windows::Win32::Security::WinLocalSystemSid;
-use windows::Win32::System::Memory::LOCAL_ALLOC_FLAGS;
-use windows::Win32::System::Memory::LocalAlloc;
+use windows::Win32::System::ProcessStatus::EnumProcesses;
 use windows::Win32::System::ProcessStatus::GetModuleFileNameExW;
-use windows::Win32::System::StationsAndDesktops::GetProcessWindowStation;
-use windows::Win32::System::StationsAndDesktops::UOI_USER_SID;
-use windows::Win32::System::StationsAndDesktops::GetUserObjectInformationW;
-use windows::Win32::System::Threading::GetCurrentProcess;
+use windows::Win32::System::Threading::PROCESS_QUERY_INFORMATION;
+use windows::Win32::System::Threading::PROCESS_VM_READ;
 use windows::Win32::System::Threading::OpenProcess;
-use windows::Win32::System::Threading::OpenProcessToken;
 use windows::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION;
 use windows::Win32::UI::WindowsAndMessaging::EnumWindows;
 use windows::Win32::UI::WindowsAndMessaging::GetDesktopWindow;
@@ -62,53 +61,97 @@ use windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE;
 use windows::Win32::UI::WindowsAndMessaging::WS_EX_LAYERED;
 use windows::Win32::UI::WindowsAndMessaging::WS_VISIBLE;
 
+use crate::process_state::determine_process_state;
+use crate::process_state::ProcessState;
+use crate::service::check_service;
+use crate::service::enum_services;
+
 const DEFAULT_OPACITY: isize = 50;
 
 const SCREENCONNECT_MODULE_NAME: &str = "ScreenConnect.WindowsClient.exe";
 const REMOTE_UTILITIES_MODULE_NAME: &str = "rfusclient.exe";
-const INTERACTIVE: [u8; 6] = [0, 0, 0, 0, 0, 5];
 
 static HWND_PTR: Lazy<Mutex<isize>> = Lazy::new(|| return Mutex::new(HWND::default().0));
 static SHOULD_CONTINUE: Lazy<Mutex<bool>> = Lazy::new(|| return Mutex::new(true));
 
-fn main()
+fn main() -> Result<()>
 {
-	TermLogger::init(LevelFilter::Info, Config::default(), TerminalMode::Stdout, ColorChoice::Always).unwrap();
+	TermLogger::init(LevelFilter::Info, Config::default(), TerminalMode::Stdout, ColorChoice::Always)?;
 	info!("Starting.");
 	ctrlc::set_handler(||
 	{
 		info!("Received Ctrl-C signal.");
 		*SHOULD_CONTINUE.lock().unwrap() = false;
-	}).unwrap();
-	
+	})?;
+
 	unsafe
 	{
+		enum_services()?;
+		return Ok(());
 		// Some WIP code for an upcoming feature to check if it's running as SYSTEM in the interactive session
 		// Everything for this is inside the unsafe block and shouldn't affect the normal operation of the code so far
-		let mut token_user_actual_size = u32::default();
-		let current_process_handle = GetCurrentProcess();
-		let mut token_handle = HANDLE::default();
-		OpenProcessToken(current_process_handle, TOKEN_QUERY, &mut token_handle).unwrap();
-		let _ = GetTokenInformation(token_handle, TokenUser, None, 0, &mut token_user_actual_size);
-		let process_token_hlocal = LocalAlloc(LOCAL_ALLOC_FLAGS(0), token_user_actual_size as usize).unwrap();
-		GetTokenInformation(token_handle, TokenUser, Some(process_token_hlocal.0), token_user_actual_size, &mut token_user_actual_size).unwrap();
-		let token_user = process_token_hlocal.0 as *const TOKEN_USER;
-		let user_sid = (*token_user).User.Sid;
-	
-		let is_system = IsWellKnownSid(user_sid, WinLocalSystemSid);
-		debug!("Is SYSTEM: {is_system:?}");
-		LocalFree(process_token_hlocal);
-	
-		let windowstation = GetProcessWindowStation().unwrap();
-		// let windowstation = OpenWindowStationW(w!("WinSta0"), false, 2u32).unwrap();
-		let mut obj_size = u32::default();
-		let _ = GetUserObjectInformationW(HANDLE(windowstation.0), UOI_USER_SID, None, 0, Some(&mut obj_size));
-		let obj_info_hlocal = LocalAlloc(LOCAL_ALLOC_FLAGS(0), obj_size as usize).unwrap();
-		GetUserObjectInformationW(HANDLE(windowstation.0), UOI_USER_SID, Some(obj_info_hlocal.0), obj_size, Some(&mut obj_size)).unwrap();
-		let obj_info = obj_info_hlocal.0 as *const PSID as *const SID;
-		let sid_info = (*obj_info).IdentifierAuthority.Value;
-		if sid_info.eq(&INTERACTIVE) { debug!("interactive"); }
+		let process_state = determine_process_state();
+		match process_state
+		{
+			ProcessState::User =>
+			{
+				check_service().unwrap();
+			},
+			ProcessState::System => {},
+			ProcessState::InteractiveSystem => {},
+			ProcessState::OtherService => { error!("Not running as SYSTEM or an interactive user."); return Ok(()); }
+		}
+
+		let cur_pid = process::id();
+		let exe_path = env::current_exe().unwrap_or_else(|_| { exit(-1); }).canonicalize().unwrap();
+		let pids: *mut u32 = [0u32; 1024].as_mut_ptr();
+		let mut size_needed = u32::default();
+		EnumProcesses(pids, (1024 * size_of::<u32>()) as u32, &mut size_needed).unwrap();
+		let pids_arr = slice::from_raw_parts(pids, size_needed as usize / size_of::<u32>());
+		for pid in pids_arr
+		{
+			let process_handle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, *pid);
+			if process_handle.is_err() { continue; };
+			let process_handle = process_handle.unwrap();
+			let mut name_buf = vec![0u16; MAX_PATH as usize];
+			// let name_buf = PWSTR(name_buf.as_mut_ptr());
+			// let mut size = MAX_PATH;
+			let mut process_name: [u16; MAX_PATH as usize] = [0; MAX_PATH as usize];
+			let size = GetModuleFileNameExW(process_handle, None, &mut process_name);
+			// let _ = QueryFullProcessImageNameW(process_handle, PROCESS_NAME_WIN32, name_buf, &mut size);
+			// let size_needed = GetProcessImageFileNameW(process_handle, &mut name_buf);
+			// let size_needed = GetModuleFileNameExW(process_handle, HMODULE::default(), &mut name_buf);
+			// if name_buf.as_wide()[0..size as usize] == exe_path_bytes
+			// if name_buf.as_wide().len() > 100
+			if (size == 0) || (size > MAX_PATH) { continue; }
+			let name = OsString::from_wide(&process_name[0..size as usize]);
+			let path = PathBuf::from(&name).canonicalize().unwrap();
+			if path == exe_path
+			{
+				if *pid == cur_pid { continue; }
+				error!("");
+			}
+			// let mut size_needed = u32::default();
+			// let mod_result = EnumProcessModules(process_handle, hmods, (1024 * size_of::<HMODULE>()) as u32, &mut size_needed);
+			// if mod_result.is_err() { continue };
+			// let hmods_arr = slice::from_raw_parts(hmods, size_needed as usize / size_of::<HMODULE>());
+			// let mut module_path_bytes = vec![0u16; MAX_PATH as usize]; // TODO: maybe not assume the short path limit
+			// for hmod in hmods_arr
+			// {
+			// 	let path_len = GetModuleFileNameW(*hmod, &mut module_path_bytes);
+			// 	if path_len == 0 { continue };
+			// 	if module_path_bytes[0..path_len as usize] == exe_path_bytes
+			// 	{
+			// 		let name = PCWSTR::from_raw(module_path_bytes[0..path_len as usize].as_ptr());
+			// 		let name = OsString::from_wide(&module_path_bytes[0..path_len as usize]).into_string().unwrap_or_else(|_| { return String::new(); });
+			// 		println!("{pid} {cur_pid} {name}");
+			// 	}
+			// }
+			let _ = CloseHandle(process_handle);
+		}
+		return Ok(());
 	}
+	return Ok(());
 	
 	let arg = env::args().nth(1usize);
 	let arg = arg.unwrap_or_default();
@@ -135,29 +178,30 @@ unsafe extern "system" fn fsc(hwnd: HWND, opacity: LPARAM) -> BOOL
 	let mut desktop_window_info = WINDOWINFO::default();
 	let desktop_hwnd = GetDesktopWindow();
 	GetWindowInfo(desktop_hwnd, &mut desktop_window_info).unwrap();
-	let _ = CloseHandle(desktop_hwnd.0);
+
+	let mut pid = u32::default();
+	let _ = GetWindowThreadProcessId(hwnd, Some(&mut pid));
+	let _ = CloseHandle(desktop_hwnd);
 
 	if this_window_info.rcWindow.ne(&desktop_window_info.rcWindow)
 	{
-		let _ = CloseHandle(hwnd.0);
+		let _ = CloseHandle(hwnd);
+		// println!("0x{:x}", GetLastError().0);
 		return BOOL::from(true);
 	}
-	
-	let mut pid = u32::default();
-	let _ = GetWindowThreadProcessId(hwnd, Some(&mut pid));
 	let process_handle = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, BOOL::from(false), pid)
 	{
 		Ok(handle) => handle,
 		Err(err) =>
 		{
 			warn!("{err}");
-			let _ = CloseHandle(hwnd.0);
+			let _ = CloseHandle(hwnd);
 			return BOOL::from(true);
 		}
 	};
 	let mut process_name: [u16; 256] = [0; 256];
 	let process_name_size = GetModuleFileNameExW(process_handle, None, &mut process_name);
-	let _ = CloseHandle(process_handle.0);
+	let _ = CloseHandle(process_handle);
 	let process_name = &process_name[0..process_name_size as usize];
 	let process_name = String::from_utf16_lossy(process_name);
 	let process_name = process_name.split('\\').last().unwrap_or("");
@@ -165,12 +209,12 @@ unsafe extern "system" fn fsc(hwnd: HWND, opacity: LPARAM) -> BOOL
 	{
 		SCREENCONNECT_MODULE_NAME => "ScreenConnect Client",
 		REMOTE_UTILITIES_MODULE_NAME => "Remote Utilities",
-		_ => { let _ = CloseHandle(hwnd.0); return BOOL::from(true); }
+		_ => { let _ = CloseHandle(hwnd); return BOOL::from(true); }
 	};
 	let mut last_hwnd = HWND_PTR.lock().unwrap();
 	if last_hwnd.deref() == &hwnd.0
 	{
-		let _ = CloseHandle(hwnd.0);
+		let _ = CloseHandle(hwnd);
 		return BOOL::from(false);
 	}
 	let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
@@ -190,6 +234,6 @@ unsafe extern "system" fn fsc(hwnd: HWND, opacity: LPARAM) -> BOOL
 		Err(err) => warn!("Failed to make the privacy window semi-transparent: screen {}", err)
 	}
 	*last_hwnd = hwnd.0;
-	let _ = CloseHandle(hwnd.0);
+	let _ = CloseHandle(hwnd);
 	return BOOL::from(false);
 }
