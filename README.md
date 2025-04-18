@@ -5,11 +5,13 @@ Support for remote desktop software (e.g., AnyDesk) that does not use a standard
 
 This is a port of the original formerly private program written in C# to Rust, made simpler and easier to understand and maintain. Now with support for Remote Utilities!
 
+## Status
+This project is considered dormant, meaning there is currently no active development, but it is not dead. It is encouraged to report issues, and anything major will be resolved.
+
 ## Planned features
-- Better and more thorough documentation.
-- Installation script including the creation of a scheduled task.
-- Build script for customizing the binaries' metadata and packaging them for release.
-- Support for other remote desktop software that uses a window for its privacy screen.
+- Elimination of the need for psexec.
+- A better installation experience. The current script is known to be fragile and overly complicated.
+- ~~Support for other remote desktop software that uses a window for its privacy screen.~~ (maybe - most remote desktop software uses much more complicated methods to provide a privacy screen, and it requires more research to begin manipluating such privacy screens.)
 
 Feature requests are welcome, but please file an issue here on GitHub rather than making a direct request elsewhere.
 
