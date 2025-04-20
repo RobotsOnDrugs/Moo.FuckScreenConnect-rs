@@ -1,4 +1,3 @@
-// #![feature(strict_provenance)]
 #![deny(clippy::implicit_return)]
 #![allow(clippy::needless_return)]
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
@@ -11,15 +10,13 @@ use std::env;
 use std::slice;
 use std::ffi::OsString;
 use std::ops::Deref;
-use std::os::windows::prelude::OsStringExt;
+use std::os::windows::ffi::OsStringExt;
 use std::path::PathBuf;
 use std::process::exit;
 use std::str::FromStr;
 use std::sync::Mutex;
 use std::thread::sleep;
 use std::time::Duration;
-
-use anyhow::Result;
 
 use log::error;
 use log::info;
@@ -33,7 +30,9 @@ use simplelog::Config;
 use simplelog::TerminalMode;
 use simplelog::TermLogger;
 
-use windows::Win32::Foundation::BOOL;
+use windows::core::BOOL;
+
+use windows::Win32::Foundation::ERROR_ACCESS_DENIED;
 use windows::Win32::Foundation::CloseHandle;
 use windows::Win32::Foundation::MAX_PATH;
 use windows::Win32::Foundation::COLORREF;
@@ -64,30 +63,31 @@ use windows::Win32::UI::WindowsAndMessaging::WS_VISIBLE;
 use crate::process_state::determine_process_state;
 use crate::process_state::ProcessState;
 use crate::service::check_service;
-use crate::service::enum_services;
+// use crate::service::enum_services;
 
 const DEFAULT_OPACITY: isize = 50;
 
 const SCREENCONNECT_MODULE_NAME: &str = "ScreenConnect.WindowsClient.exe";
 const REMOTE_UTILITIES_MODULE_NAME: &str = "rfusclient.exe";
 
-static HWND_PTR: Lazy<Mutex<isize>> = Lazy::new(|| return Mutex::new(HWND::default().0));
+// const INTERACTIVE: [u8; 6] = [0, 0, 0, 0, 0, 5];
+
+static HWND_PTR: Lazy<Mutex<usize>> = Lazy::new(|| return Mutex::new(HWND::default().0 as usize));
 static SHOULD_CONTINUE: Lazy<Mutex<bool>> = Lazy::new(|| return Mutex::new(true));
 
-fn main() -> Result<()>
+fn main()
 {
-	TermLogger::init(LevelFilter::Info, Config::default(), TerminalMode::Stdout, ColorChoice::Always)?;
+	TermLogger::init(LevelFilter::Info, Config::default(), TerminalMode::Stdout, ColorChoice::Always).unwrap();
 	info!("Starting.");
 	ctrlc::set_handler(||
 	{
 		info!("Received Ctrl-C signal.");
 		*SHOULD_CONTINUE.lock().unwrap() = false;
-	})?;
-
+	}).unwrap();
+	
 	unsafe
 	{
-		enum_services()?;
-		return Ok(());
+		// enum_services().unwrap();
 		// Some WIP code for an upcoming feature to check if it's running as SYSTEM in the interactive session
 		// Everything for this is inside the unsafe block and shouldn't affect the normal operation of the code so far
 		let process_state = determine_process_state();
@@ -99,7 +99,7 @@ fn main() -> Result<()>
 			},
 			ProcessState::System => {},
 			ProcessState::InteractiveSystem => {},
-			ProcessState::OtherService => { error!("Not running as SYSTEM or an interactive user."); return Ok(()); }
+			ProcessState::OtherService => { error!("Not running as SYSTEM or an interactive user."); return; }
 		}
 
 		let cur_pid = process::id();
@@ -113,11 +113,11 @@ fn main() -> Result<()>
 			let process_handle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, *pid);
 			if process_handle.is_err() { continue; };
 			let process_handle = process_handle.unwrap();
-			let mut name_buf = vec![0u16; MAX_PATH as usize];
+			let _ = vec![0u16; MAX_PATH as usize];
 			// let name_buf = PWSTR(name_buf.as_mut_ptr());
 			// let mut size = MAX_PATH;
 			let mut process_name: [u16; MAX_PATH as usize] = [0; MAX_PATH as usize];
-			let size = GetModuleFileNameExW(process_handle, None, &mut process_name);
+			let size = GetModuleFileNameExW(Some(process_handle), None, &mut process_name);
 			// let _ = QueryFullProcessImageNameW(process_handle, PROCESS_NAME_WIN32, name_buf, &mut size);
 			// let size_needed = GetProcessImageFileNameW(process_handle, &mut name_buf);
 			// let size_needed = GetModuleFileNameExW(process_handle, HMODULE::default(), &mut name_buf);
@@ -149,9 +149,7 @@ fn main() -> Result<()>
 			// }
 			let _ = CloseHandle(process_handle);
 		}
-		return Ok(());
 	}
-	return Ok(());
 	
 	let arg = env::args().nth(1usize);
 	let arg = arg.unwrap_or_default();
@@ -179,44 +177,33 @@ unsafe extern "system" fn fsc(hwnd: HWND, opacity: LPARAM) -> BOOL
 	let desktop_hwnd = GetDesktopWindow();
 	GetWindowInfo(desktop_hwnd, &mut desktop_window_info).unwrap();
 
+	if this_window_info.rcWindow.ne(&desktop_window_info.rcWindow) { return BOOL::from(true); }
+	
 	let mut pid = u32::default();
 	let _ = GetWindowThreadProcessId(hwnd, Some(&mut pid));
-	let _ = CloseHandle(desktop_hwnd);
-
-	if this_window_info.rcWindow.ne(&desktop_window_info.rcWindow)
-	{
-		let _ = CloseHandle(hwnd);
-		// println!("0x{:x}", GetLastError().0);
-		return BOOL::from(true);
-	}
-	let process_handle = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, BOOL::from(false), pid)
+	let process_handle = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
 	{
 		Ok(handle) => handle,
 		Err(err) =>
 		{
-			warn!("{err}");
-			let _ = CloseHandle(hwnd);
+			if err.code() != ERROR_ACCESS_DENIED.to_hresult() { warn!("Couldn't process information for process PID {pid}: {err}"); }
 			return BOOL::from(true);
 		}
 	};
 	let mut process_name: [u16; 256] = [0; 256];
-	let process_name_size = GetModuleFileNameExW(process_handle, None, &mut process_name);
-	let _ = CloseHandle(process_handle);
+	let process_name_size = GetModuleFileNameExW(process_handle.into(), None, &mut process_name);
 	let process_name = &process_name[0..process_name_size as usize];
 	let process_name = String::from_utf16_lossy(process_name);
-	let process_name = process_name.split('\\').last().unwrap_or("");
+	let process_name = process_name.split('\\').next_back().unwrap_or("");
 	let friendly_name = match process_name
 	{
 		SCREENCONNECT_MODULE_NAME => "ScreenConnect Client",
 		REMOTE_UTILITIES_MODULE_NAME => "Remote Utilities",
-		_ => { let _ = CloseHandle(hwnd); return BOOL::from(true); }
+		_ => return BOOL::from(true)
 	};
 	let mut last_hwnd = HWND_PTR.lock().unwrap();
-	if last_hwnd.deref() == &hwnd.0
-	{
-		let _ = CloseHandle(hwnd);
-		return BOOL::from(false);
-	}
+	if last_hwnd.deref() == &(hwnd.0 as _) { return BOOL::from(false); }
+	
 	let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
 	let style = WINDOW_STYLE(style as u32);
 	let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
@@ -231,9 +218,9 @@ unsafe extern "system" fn fsc(hwnd: HWND, opacity: LPARAM) -> BOOL
 	match SetLayeredWindowAttributes(hwnd, COLORREF::default(), opacity, LWA_ALPHA)
 	{
 		Ok(_) => info!("Made the {} privacy window semi-transparent.", friendly_name),
-		Err(err) => warn!("Failed to make the privacy window semi-transparent: screen {}", err)
+		Err(err) => warn!("Failed to make the privacy window semi-transparent: screen {err}")
 	}
-	*last_hwnd = hwnd.0;
-	let _ = CloseHandle(hwnd);
+	
+	*last_hwnd = hwnd.0 as _;
 	return BOOL::from(false);
 }

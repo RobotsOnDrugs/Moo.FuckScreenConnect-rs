@@ -10,7 +10,7 @@ use windows::Win32::Foundation::ERROR_ACCESS_DENIED;
 use windows::Win32::Foundation::ERROR_MORE_DATA;
 use windows::Win32::Foundation::ERROR_SERVICE_DOES_NOT_EXIST;
 use windows::Win32::Foundation::WIN32_ERROR;
-use windows::Win32::Security::SC_HANDLE;
+use windows::Win32::System::Services::SC_HANDLE;
 use windows::Win32::System::Services::CreateServiceW;
 use windows::Win32::System::Services::EnumServicesStatusW;
 use windows::Win32::System::Services::OpenSCManagerW;
@@ -25,6 +25,7 @@ use windows::Win32::System::Services::SERVICE_ERROR_NORMAL;
 use windows::Win32::System::Services::SERVICE_STATE_ALL;
 use windows::Win32::System::Services::SERVICE_WIN32_OWN_PROCESS;
 
+#[allow(dead_code)]
 pub unsafe fn check_service() -> Result<(), WIN32_ERROR>
 {
 	let service_control_manager = OpenSCManagerW(PCWSTR::null(), PCWSTR::null(), SC_MANAGER_ALL_ACCESS);
@@ -34,17 +35,17 @@ pub unsafe fn check_service() -> Result<(), WIN32_ERROR>
 		Err(_) =>
 		{
 			let err = GetLastError();
-			let addl_message = match err
+			let additonal_message = match err
 			{
 				ERROR_ACCESS_DENIED => " Are you admin?",
 				_ => ""
 			};
-			error!("Couldn't open the service manager (Error code 0x{:x}).{}", err.0, addl_message);
+			error!("Couldn't open the service manager (Error code 0x{:x}).{}", err.0, additonal_message);
 			return Err(err);
 		}
 	};
 	let manager = OpenServiceW(service_control_manager, w!("FSC Service"), SERVICE_ALL_ACCESS);
-	let service_control_manager: Result<SC_HANDLE, WIN32_ERROR> = match manager
+	let _: Result<SC_HANDLE, WIN32_ERROR> = match manager
 	{
 		Ok(manager) => Ok(manager),
 		Err(_) =>
@@ -77,6 +78,7 @@ pub unsafe fn check_service() -> Result<(), WIN32_ERROR>
 	return Ok(());
 }
 
+#[allow(dead_code)]
 pub unsafe fn enum_services() -> Result<bool>
 {
 	let service_control_manager = OpenSCManagerW(PCWSTR::null(), PCWSTR::null(), SC_MANAGER_ENUMERATE_SERVICE | SC_MANAGER_CONNECT)

@@ -1,10 +1,25 @@
 use windows::core::PCWSTR;
-use windows::Win32::Foundation::{CloseHandle, LocalFree, HANDLE};
-use windows::Win32::Security::{GetTokenInformation, IsWellKnownSid, TokenUser, WinLocalSystemSid, TOKEN_QUERY, TOKEN_USER};
-use windows::Win32::System::Memory::{LocalAlloc, LOCAL_ALLOC_FLAGS};
-use windows::Win32::System::StationsAndDesktops::{GetProcessWindowStation, GetUserObjectInformationW, UOI_NAME, UOI_USER_SID};
-use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-use crate::process_state::ProcessState::{InteractiveSystem, OtherService, User};
+use windows::Win32::Foundation::LocalFree;
+use windows::Win32::Foundation::CloseHandle;
+use windows::Win32::Foundation::HANDLE;
+use windows::Win32::Security::TOKEN_QUERY;
+use windows::Win32::Security::WinLocalSystemSid;
+use windows::Win32::Security::TokenUser;
+use windows::Win32::Security::IsWellKnownSid;
+use windows::Win32::Security::GetTokenInformation;
+use windows::Win32::Security::TOKEN_USER;
+use windows::Win32::System::Memory::LocalAlloc;
+use windows::Win32::System::Memory::LOCAL_ALLOC_FLAGS;
+use windows::Win32::System::StationsAndDesktops::UOI_NAME;
+use windows::Win32::System::StationsAndDesktops::GetUserObjectInformationW;
+use windows::Win32::System::StationsAndDesktops::GetProcessWindowStation;
+use windows::Win32::System::StationsAndDesktops::UOI_USER_SID;
+use windows::Win32::System::Threading::GetCurrentProcess;
+use windows::Win32::System::Threading::OpenProcessToken;
+
+use crate::process_state::ProcessState::InteractiveSystem;
+use crate::process_state::ProcessState::OtherService;
+use crate::process_state::ProcessState::User;
 
 #[derive(Debug, Clone)]
 pub enum ProcessState
@@ -15,6 +30,7 @@ pub enum ProcessState
 	OtherService
 }
 
+#[allow(dead_code)]
 pub unsafe fn determine_process_state() -> ProcessState
 {
 	let current_process_handle = GetCurrentProcess();
@@ -52,7 +68,7 @@ pub unsafe fn is_system_token(token_handle: HANDLE) -> bool
 	let token_user = process_token_hlocal.0 as *const TOKEN_USER;
 	let user_sid = (*token_user).User.Sid;
 	let is_system = IsWellKnownSid(user_sid, WinLocalSystemSid);
-	LocalFree(process_token_hlocal);
+	LocalFree(Some(process_token_hlocal));
 	return is_system.as_bool();
 }
 
@@ -66,6 +82,6 @@ pub unsafe fn is_interactive() -> bool
 	let obj_info = obj_info_hlocal.0 as *const u16;
 	let name = PCWSTR(obj_info);
 	let name = name.to_string().unwrap();
-	LocalFree(obj_info_hlocal);
+	LocalFree(Some(obj_info_hlocal));
 	return name.eq("WinSta0");
 }
