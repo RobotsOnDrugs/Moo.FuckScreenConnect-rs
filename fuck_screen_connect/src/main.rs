@@ -1,47 +1,32 @@
 #![deny(clippy::implicit_return)]
 #![allow(clippy::needless_return)]
-#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+#![cfg_attr(all(target_os = "windows"), windows_subsystem = "windows")]
+#![cfg_attr(debug_assertions, allow(unused_imports))]
 
 mod service;
 mod process_state;
 
-use std::process;
 use std::env;
-use std::slice;
-use std::ffi::OsString;
 use std::ops::Deref;
-use std::os::windows::ffi::OsStringExt;
-use std::path::PathBuf;
 use std::process::exit;
 use std::str::FromStr;
 use std::sync::Mutex;
 use std::thread::sleep;
 use std::time::Duration;
-
-use log::error;
+// use clap::Arg;
 use log::info;
-use log::LevelFilter;
 use log::warn;
 
 use once_cell::sync::Lazy;
-
-use simplelog::ColorChoice;
-use simplelog::Config;
-use simplelog::TerminalMode;
-use simplelog::TermLogger;
 
 use windows::core::BOOL;
 
 use windows::Win32::Foundation::ERROR_ACCESS_DENIED;
 use windows::Win32::Foundation::CloseHandle;
-use windows::Win32::Foundation::MAX_PATH;
 use windows::Win32::Foundation::COLORREF;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Foundation::LPARAM;
-use windows::Win32::System::ProcessStatus::EnumProcesses;
 use windows::Win32::System::ProcessStatus::GetModuleFileNameExW;
-use windows::Win32::System::Threading::PROCESS_QUERY_INFORMATION;
-use windows::Win32::System::Threading::PROCESS_VM_READ;
 use windows::Win32::System::Threading::OpenProcess;
 use windows::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION;
 use windows::Win32::UI::WindowsAndMessaging::EnumWindows;
@@ -60,9 +45,6 @@ use windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE;
 use windows::Win32::UI::WindowsAndMessaging::WS_EX_LAYERED;
 use windows::Win32::UI::WindowsAndMessaging::WS_VISIBLE;
 
-use crate::process_state::determine_process_state;
-use crate::process_state::ProcessState;
-use crate::service::check_service;
 // use crate::service::enum_services;
 
 const DEFAULT_OPACITY: isize = 50;
@@ -77,19 +59,19 @@ static SHOULD_CONTINUE: Lazy<Mutex<bool>> = Lazy::new(|| return Mutex::new(true)
 
 fn main()
 {
-	TermLogger::init(LevelFilter::Info, Config::default(), TerminalMode::Stdout, ColorChoice::Always).unwrap();
-	info!("Starting.");
 	ctrlc::set_handler(||
 	{
 		info!("Received Ctrl-C signal.");
 		*SHOULD_CONTINUE.lock().unwrap() = false;
 	}).unwrap();
-	
+
+	#[cfg(any())]
 	unsafe
 	{
-		// enum_services().unwrap();
 		// Some WIP code for an upcoming feature to check if it's running as SYSTEM in the interactive session
 		// Everything for this is inside the unsafe block and shouldn't affect the normal operation of the code so far
+		
+		// enum_services().unwrap();
 		let process_state = determine_process_state();
 		match process_state
 		{
@@ -114,15 +96,8 @@ fn main()
 			if process_handle.is_err() { continue; };
 			let process_handle = process_handle.unwrap();
 			let _ = vec![0u16; MAX_PATH as usize];
-			// let name_buf = PWSTR(name_buf.as_mut_ptr());
-			// let mut size = MAX_PATH;
 			let mut process_name: [u16; MAX_PATH as usize] = [0; MAX_PATH as usize];
 			let size = GetModuleFileNameExW(Some(process_handle), None, &mut process_name);
-			// let _ = QueryFullProcessImageNameW(process_handle, PROCESS_NAME_WIN32, name_buf, &mut size);
-			// let size_needed = GetProcessImageFileNameW(process_handle, &mut name_buf);
-			// let size_needed = GetModuleFileNameExW(process_handle, HMODULE::default(), &mut name_buf);
-			// if name_buf.as_wide()[0..size as usize] == exe_path_bytes
-			// if name_buf.as_wide().len() > 100
 			if (size == 0) || (size > MAX_PATH) { continue; }
 			let name = OsString::from_wide(&process_name[0..size as usize]);
 			let path = PathBuf::from(&name).canonicalize().unwrap();
@@ -131,22 +106,6 @@ fn main()
 				if *pid == cur_pid { continue; }
 				error!("");
 			}
-			// let mut size_needed = u32::default();
-			// let mod_result = EnumProcessModules(process_handle, hmods, (1024 * size_of::<HMODULE>()) as u32, &mut size_needed);
-			// if mod_result.is_err() { continue };
-			// let hmods_arr = slice::from_raw_parts(hmods, size_needed as usize / size_of::<HMODULE>());
-			// let mut module_path_bytes = vec![0u16; MAX_PATH as usize]; // TODO: maybe not assume the short path limit
-			// for hmod in hmods_arr
-			// {
-			// 	let path_len = GetModuleFileNameW(*hmod, &mut module_path_bytes);
-			// 	if path_len == 0 { continue };
-			// 	if module_path_bytes[0..path_len as usize] == exe_path_bytes
-			// 	{
-			// 		let name = PCWSTR::from_raw(module_path_bytes[0..path_len as usize].as_ptr());
-			// 		let name = OsString::from_wide(&module_path_bytes[0..path_len as usize]).into_string().unwrap_or_else(|_| { return String::new(); });
-			// 		println!("{pid} {cur_pid} {name}");
-			// 	}
-			// }
 			let _ = CloseHandle(process_handle);
 		}
 	}
@@ -192,6 +151,7 @@ unsafe extern "system" fn fsc(hwnd: HWND, opacity: LPARAM) -> BOOL
 	};
 	let mut process_name: [u16; 256] = [0; 256];
 	let process_name_size = GetModuleFileNameExW(process_handle.into(), None, &mut process_name);
+	let _ = CloseHandle(process_handle);
 	let process_name = &process_name[0..process_name_size as usize];
 	let process_name = String::from_utf16_lossy(process_name);
 	let process_name = process_name.split('\\').next_back().unwrap_or("");
