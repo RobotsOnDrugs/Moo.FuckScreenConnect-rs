@@ -5,16 +5,15 @@
 #![cfg_attr(debug_assertions, allow(unused_imports))]
 
 use std::ffi::OsString;
-use std::fs::OpenOptions;
 use std::process::exit;
 use std::ptr::null_mut;
 use std::thread::sleep;
 use std::time::Duration;
 
-use log::{error, info};
+use log::error;
+use log::info;
 use log::LevelFilter;
 
-use simplelog::Config;
 use simplelog::WriteLogger;
 
 use windows::core::w;
@@ -40,8 +39,6 @@ use windows::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION;
 use windows::Win32::System::Threading::STARTUPINFOW;
 use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
-use windows_helpers::pwstr;
-
 use windows_service::define_windows_service;
 use windows_service::service_control_handler;
 use windows_service::service::ServiceControl;
@@ -50,20 +47,26 @@ use windows_service::service::ServiceExitCode;
 use windows_service::service::ServiceState;
 use windows_service::service::ServiceStatus;
 use windows_service::service::ServiceType;
-use windows_service::service_control_handler::{ServiceControlHandlerResult, ServiceStatusHandle};
+use windows_service::service_control_handler::ServiceControlHandlerResult;
+use windows_service::service_control_handler::ServiceStatusHandle;
 
+use fsc_common::logging::get_default_config;
+use fsc_common::logging::get_default_file;
+
+#[cfg_attr(debug_assertions, allow(dead_code))]
+const DEFAULT_SERVICE_NAME: &str = "fscserv";
 const PROCESS_NAME: &str = r#""#;
 
 define_windows_service!(ffi_service_main, service_entry);
 
 fn main() -> Result<(), windows_service::Error>
 {
-	let options = OpenOptions::new().create(true).append(true).open(r#"C:\Temp\fscserv.log"#).unwrap();
-	WriteLogger::init(LevelFilter::Info, Config::default(), options).unwrap();
+	WriteLogger::init(LevelFilter::Info, get_default_config(), get_default_file()).unwrap();
+
 	info!("Starting main.");
 	info!("{:?}", std::env::args());
 	#[cfg_attr(debug_assertions, cfg(any()))]
-	windows_service::service_dispatcher::start("fscserv", ffi_service_main)?;
+	windows_service::service_dispatcher::start(DEFAULT_SERVICE_NAME, ffi_service_main)?;
 	#[cfg(debug_assertions)]
 	service_entry(Vec::new());
 	return Ok(());
@@ -85,7 +88,7 @@ fn service_entry(_: Vec<OsString>)
 					_ => ServiceControlHandlerResult::NoError,
 				}
 			};
-		status_handle = service_control_handler::register("fscserv", event_handler).unwrap();
+		status_handle = service_control_handler::register(DEFAULT_SERVICE_NAME, event_handler).unwrap();
 		let next_status = ServiceStatus
 		{
 			// Should match the one from system service registry
@@ -108,13 +111,13 @@ fn service_entry(_: Vec<OsString>)
 
 	unsafe
 	{
-		let candidate_process_handle = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, GetCurrentProcessId())
+		let current_process_handle = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, GetCurrentProcessId())
 		{
 			Ok(handle) => handle,
 			Err(_) => { return; }
 		};
 		let mut candidate_token_handle = HANDLE::default();
-		let get_process_information = OpenProcessToken(candidate_process_handle, TOKEN_ALL_ACCESS, &mut candidate_token_handle);
+		let get_process_information = OpenProcessToken(current_process_handle, TOKEN_ALL_ACCESS, &mut candidate_token_handle);
 		if get_process_information.is_err() { exit(1); }
 		let mut duplicated_token_handle = HANDLE::default();
 		DuplicateTokenEx(candidate_token_handle, TOKEN_ACCESS_MASK(0), None, SecurityImpersonation, TokenImpersonation, &mut duplicated_token_handle).unwrap();
@@ -135,8 +138,9 @@ fn service_entry(_: Vec<OsString>)
 			wShowWindow: SW_HIDE.0 as _,
 			..Default::default()
 		};
-		let mut buf;
-		let app_path = pwstr!(PROCESS_NAME, buf);
+		let mut buf= PROCESS_NAME.encode_utf16().collect::<Vec<u16>>();
+		buf.push(0);
+		let app_path = PWSTR::from_raw(buf.as_mut_ptr());
 		let mut process_info = PROCESS_INFORMATION::default();
 		let create_process = CreateProcessAsUserW(Some(duplicated_token_handle), app_path, None, None, None, false, creation_flags, Some(env), PWSTR::null(), &startup_info, &mut process_info);
 		if create_process.is_err()
@@ -145,9 +149,8 @@ fn service_entry(_: Vec<OsString>)
 			return;
 		}
 	}
+	
 	info!("Stopping service.");
-	sleep(Duration::from_secs(5));
-
 	// Tell the system that service has stopped.
 	#[cfg_attr(debug_assertions, cfg(any()))]
 	status_handle.set_service_status

@@ -1,6 +1,6 @@
 [package]
-name = "fuck_screen_connect_service"
-version = "0.4.0-pre"
+name = "fsc_service"
+version = "0.4.0-pre2"
 edition = "2024"
 
 [dependencies]
@@ -9,7 +9,8 @@ clap = "4.5"
 log = "0.4"
 simplelog = "0.12"
 windows-service = "0.8"
-windows_helpers = { path = "../../../windows_helpers" }
+
+fsc_common = { path = "../fsc_common" }
 
 [dependencies.windows]
 version = "0.61"

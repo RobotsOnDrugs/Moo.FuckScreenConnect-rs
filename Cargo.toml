@@ -1,3 +1,3 @@
 [workspace]
-members = ["fuck_screen_connect", "fuck_screen_connect_service"]
+members = ["fsc_core", "fsc_service", "fsc_common"]
 resolver = "2"

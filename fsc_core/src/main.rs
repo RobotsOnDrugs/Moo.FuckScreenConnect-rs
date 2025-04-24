@@ -13,12 +13,12 @@ use std::str::FromStr;
 use std::sync::Mutex;
 use std::thread::sleep;
 use std::time::Duration;
-// use clap::Arg;
 use log::info;
+use log::LevelFilter;
 use log::warn;
 
 use once_cell::sync::Lazy;
-
+use simplelog::WriteLogger;
 use windows::core::BOOL;
 
 use windows::Win32::Foundation::ERROR_ACCESS_DENIED;
@@ -45,7 +45,8 @@ use windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE;
 use windows::Win32::UI::WindowsAndMessaging::WS_EX_LAYERED;
 use windows::Win32::UI::WindowsAndMessaging::WS_VISIBLE;
 
-// use crate::service::enum_services;
+use fsc_common::logging::get_default_config;
+use fsc_common::logging::get_default_file;
 
 const DEFAULT_OPACITY: isize = 50;
 
@@ -53,12 +54,13 @@ const SCREENCONNECT_MODULE_NAME: &str = "ScreenConnect.WindowsClient.exe";
 const REMOTE_UTILITIES_MODULE_NAME: &str = "rfusclient.exe";
 
 // const INTERACTIVE: [u8; 6] = [0, 0, 0, 0, 0, 5];
-
 static HWND_PTR: Lazy<Mutex<usize>> = Lazy::new(|| return Mutex::new(HWND::default().0 as usize));
 static SHOULD_CONTINUE: Lazy<Mutex<bool>> = Lazy::new(|| return Mutex::new(true));
 
 fn main()
 {
+	let _ = WriteLogger::init(LevelFilter::Info, get_default_config(), get_default_file());
+	
 	ctrlc::set_handler(||
 	{
 		info!("Received Ctrl-C signal.");
@@ -128,6 +130,7 @@ fn main()
 	exit(0);
 }
 
+#[allow(unsafe_op_in_unsafe_fn)]
 unsafe extern "system" fn fsc(hwnd: HWND, opacity: LPARAM) -> BOOL
 {
 	let mut this_window_info = WINDOWINFO::default();
@@ -135,7 +138,6 @@ unsafe extern "system" fn fsc(hwnd: HWND, opacity: LPARAM) -> BOOL
 	let mut desktop_window_info = WINDOWINFO::default();
 	let desktop_hwnd = GetDesktopWindow();
 	GetWindowInfo(desktop_hwnd, &mut desktop_window_info).unwrap();
-
 	if this_window_info.rcWindow.ne(&desktop_window_info.rcWindow) { return BOOL::from(true); }
 	
 	let mut pid = u32::default();
