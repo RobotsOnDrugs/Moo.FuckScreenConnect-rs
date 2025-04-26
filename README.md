@@ -5,9 +5,6 @@ Support for remote desktop software (e.g., AnyDesk) that does not use a standard
 
 This is a port of the original formerly private program written in C# to Rust, made simpler and easier to understand and maintain. Now with support for Remote Utilities!
 
-## Status
-This project is considered dormant, meaning there is currently no active development, but it is not dead. It is encouraged to report issues, and anything major will be resolved.
-
 ## Planned features
 - Elimination of the need for psexec.
 - A better installation experience. The current script is known to be fragile and overly complicated.
