@@ -27,8 +27,10 @@ if ($LASTEXITCODE -eq 0)
 	$(New-Item -Force -Type Directory $new_path) | Out-Null
 	cargo.exe build
 	cargo.exe build --release
-	Copy-Item -Path '.\target\debug\moo_fuck_screen_connect.exe' -Destination '.\build\moo_fuck_screen_connect_debug.exe'
-	Copy-Item -Path '.\target\release\moo_fuck_screen_connect.exe' -Destination '.\build\moo_fuck_screen_connect.exe'
+	Copy-Item -Path '.\target\debug\fsc_core.exe' -Destination '.\build\fsc_core.exe'
+	Copy-Item -Path '.\target\debug\fsc_service.exe' -Destination '.\build\fsc_service.exe'
+	Copy-Item -Path '.\target\release\fsc_core.exe' -Destination '.\build\fsc_core.exe'
+	Copy-Item -Path '.\target\release\fsc_service.exe' -Destination '.\build\fsc_service.exe'
 	Copy-Item -Path '.\install.ps1' -Destination '.\build\install.ps1'
 	Copy-Item -Recurse -Path '.\install_modules' -Destination '.\build\'
 }

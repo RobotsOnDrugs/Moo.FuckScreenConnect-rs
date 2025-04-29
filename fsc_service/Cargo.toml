@@ -1,14 +1,16 @@
 [package]
 name = "fsc_service"
-version = "0.4.0-pre3"
+version = "0.4.0-pre4"
 edition = "2024"
 
 [dependencies]
 anyhow = "1.0"
 clap = "4.5"
 log = "0.4"
+once_cell = "1.21"
 simplelog = "0.12"
 windows-service = "0.8"
+windows-result = "0.3"
 
 fsc_common = { path = "../fsc_common" }
 
