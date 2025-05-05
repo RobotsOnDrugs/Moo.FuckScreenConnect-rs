@@ -7,20 +7,21 @@ mod service;
 mod process_state;
 
 use std::env;
-use std::ops::Deref;
 use std::process::exit;
 use std::str::FromStr;
 use std::sync::Mutex;
 use std::thread::sleep;
 use std::time::Duration;
+
+use once_cell::sync::Lazy;
+
 use log::info;
 use log::LevelFilter;
 use log::warn;
 
-use once_cell::sync::Lazy;
 use simplelog::WriteLogger;
-use windows::core::BOOL;
 
+use windows::core::BOOL;
 use windows::Win32::Foundation::ERROR_ACCESS_DENIED;
 use windows::Win32::Foundation::CloseHandle;
 use windows::Win32::Foundation::COLORREF;
@@ -32,7 +33,6 @@ use windows::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION;
 use windows::Win32::UI::WindowsAndMessaging::EnumWindows;
 use windows::Win32::UI::WindowsAndMessaging::GetDesktopWindow;
 use windows::Win32::UI::WindowsAndMessaging::GetWindowInfo;
-use windows::Win32::UI::WindowsAndMessaging::WINDOWINFO;
 use windows::Win32::UI::WindowsAndMessaging::GetWindowLongPtrW;
 use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
 use windows::Win32::UI::WindowsAndMessaging::GWL_EXSTYLE;
@@ -40,6 +40,7 @@ use windows::Win32::UI::WindowsAndMessaging::GWL_STYLE;
 use windows::Win32::UI::WindowsAndMessaging::LWA_ALPHA;
 use windows::Win32::UI::WindowsAndMessaging::SetLayeredWindowAttributes;
 use windows::Win32::UI::WindowsAndMessaging::SetWindowLongPtrW;
+use windows::Win32::UI::WindowsAndMessaging::WINDOWINFO;
 use windows::Win32::UI::WindowsAndMessaging::WINDOW_EX_STYLE;
 use windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE;
 use windows::Win32::UI::WindowsAndMessaging::WS_EX_LAYERED;
@@ -53,7 +54,6 @@ const DEFAULT_OPACITY: isize = 50;
 const SCREENCONNECT_MODULE_NAME: &str = "ScreenConnect.WindowsClient.exe";
 const REMOTE_UTILITIES_MODULE_NAME: &str = "rfusclient.exe";
 
-// const INTERACTIVE: [u8; 6] = [0, 0, 0, 0, 0, 5];
 static HWND_PTR: Lazy<Mutex<usize>> = Lazy::new(|| return Mutex::new(HWND::default().0 as usize));
 static SHOULD_CONTINUE: Lazy<Mutex<bool>> = Lazy::new(|| return Mutex::new(true));
 
@@ -164,7 +164,7 @@ unsafe extern "system" fn fsc(hwnd: HWND, opacity: LPARAM) -> BOOL
 		_ => return BOOL::from(true)
 	};
 	let mut last_hwnd = HWND_PTR.lock().unwrap();
-	if last_hwnd.deref() == &(hwnd.0 as _) { return BOOL::from(false); }
+	if *last_hwnd == (hwnd.0 as _) { return BOOL::from(true); }
 	
 	let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
 	let style = WINDOW_STYLE(style as u32);
@@ -172,7 +172,7 @@ unsafe extern "system" fn fsc(hwnd: HWND, opacity: LPARAM) -> BOOL
 	let ex_style = WINDOW_EX_STYLE(ex_style as u32);
 	let is_layered = ex_style == (ex_style | WS_EX_LAYERED);
 	let is_visible = style == (style | WS_VISIBLE);
-	if !is_visible && !is_layered { return BOOL::from(false); }
+	if !is_visible && !is_layered { return BOOL::from(true); }
 	let new_ex_style = ex_style | WS_EX_LAYERED;
 	let _ = SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_ex_style.0 as isize);
 	let opacity = opacity.0;

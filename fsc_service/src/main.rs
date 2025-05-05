@@ -2,6 +2,7 @@
 #![allow(clippy::needless_return)]
 #![cfg_attr(all(target_os = "windows"), windows_subsystem = "windows")]
 
+use std::env;
 use std::env::args;
 use std::ffi::OsStr;
 use std::ffi::OsString;
@@ -17,37 +18,38 @@ use std::sync::Mutex;
 use std::thread::sleep;
 use std::time::Duration;
 
-use log::info;
-use log::LevelFilter;
 use log::error;
+use log::info;
 use log::warn;
+use log::LevelFilter;
 
 use once_cell::sync::Lazy;
 
 use simplelog::WriteLogger;
 
+use windows::core::w;
 use windows::core::PCWSTR;
 use windows::core::PWSTR;
-use windows::core::w;
 use windows::Win32::Foundation::CloseHandle;
-use windows::Win32::Foundation::MAX_PATH;
-use windows::Win32::Foundation::ERROR_INVALID_PARAMETER;
 use windows::Win32::Foundation::ERROR_ACCESS_DENIED;
 use windows::Win32::Foundation::ERROR_GEN_FAILURE;
+use windows::Win32::Foundation::ERROR_INVALID_PARAMETER;
 use windows::Win32::Foundation::GetLastError;
 use windows::Win32::Foundation::HANDLE;
+use windows::Win32::Foundation::MAX_PATH;
 use windows::Win32::Foundation::NTSTATUS;
 use windows::Win32::Foundation::STILL_ACTIVE;
+use windows::Win32::Security::DuplicateTokenEx;
+use windows::Win32::Security::SecurityImpersonation;
+use windows::Win32::Security::TokenImpersonation;
+use windows::Win32::Security::TOKEN_ACCESS_MASK;
 use windows::Win32::Security::TOKEN_ALL_ACCESS;
 use windows::Win32::System::Environment::CreateEnvironmentBlock;
-use windows::Win32::System::Threading::CreateProcessW;
+use windows::Win32::System::ProcessStatus::EnumProcesses;
 use windows::Win32::System::Threading::CreateProcessAsUserW;
+use windows::Win32::System::Threading::CreateProcessW;
 use windows::Win32::System::Threading::CREATE_NO_WINDOW;
 use windows::Win32::System::Threading::CREATE_UNICODE_ENVIRONMENT;
-use windows::Win32::System::ProcessStatus::EnumProcesses;
-#[cfg_attr(not(debug_assertions), allow(unused_imports))]
-use windows::Win32::System::Threading::GetCurrentProcess;
-use windows::Win32::System::Threading::GetCurrentProcessId;
 use windows::Win32::System::Threading::GetExitCodeProcess;
 use windows::Win32::System::Threading::OpenProcess;
 use windows::Win32::System::Threading::OpenProcessToken;
@@ -60,7 +62,9 @@ use windows::Win32::System::Threading::QueryFullProcessImageNameW;
 use windows::Win32::System::Threading::STARTUPINFOW;
 use windows::Win32::System::Threading::TerminateProcess;
 use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
+
 use windows_result::HRESULT;
+
 use windows_service::define_windows_service;
 #[cfg_attr(debug_assertions, allow(unused_imports))]
 use windows_service::service::ServiceControl;
@@ -78,8 +82,17 @@ use windows_service::service_control_handler::ServiceStatusHandle;
 use fsc_common::logging::get_default_config;
 use fsc_common::logging::get_default_file;
 
+
 static SHOULD_CONTINUE: Lazy<Mutex<bool>> = Lazy::new(|| return Mutex::new(true));
 
+static WINLOGON_PATH: Lazy<Mutex<PathBuf>> = Lazy::new(||
+{
+	let system_root_path = env::var_os("SystemRoot").unwrap();
+	let mut winlogon_path = PathBuf::from(system_root_path);
+	winlogon_path.push("System32");
+	winlogon_path.push("winlogon.exe");
+	return Mutex::new(winlogon_path.canonicalize().unwrap());
+});
 static FSC_CORE_NAME: Lazy<Mutex<&OsStr>> = Lazy::new(|| return Mutex::new(OsStr::new("fsc_core.exe")));
 static FSC_CORE_PATH_BYTES: Lazy<Mutex<Arc<[u16]>>> = Lazy::new(||
 {
@@ -94,7 +107,7 @@ static FSC_DIR_PATH_BYTES: Lazy<Mutex<Arc<[u16]>>> = Lazy::new(||
 });
 static FSC_DIR_PATH: Lazy<Mutex<PathBuf>> = Lazy::new(||
 {
-	let current_exe_path = std::env::current_exe().unwrap();
+	let current_exe_path = env::current_exe().unwrap();
 	let current_dir = current_exe_path.parent().unwrap();
 	return Mutex::new(current_dir.to_owned());
 });
@@ -111,6 +124,14 @@ fn log_error_message(base_message: &str)
 	let error;
 	unsafe { error = GetLastError(); }
 	error!("{}: 0x{:x} {} Cannot continue.", base_message, error.0, error.to_hresult().message());
+}
+fn bail_with_error(error_message: &str)
+{
+	log_error_message(error_message);
+	#[cfg_attr(debug_assertions, cfg(any()))]
+	update_service_status(&status_handle, ServiceState::Stopped, ServiceControlAccept::empty(), 1).unwrap();
+	#[cfg_attr(not(debug_assertions), cfg(any()))]
+	exit(1);
 }
 
 define_windows_service!(ffi_service_main, service_entry);
@@ -184,6 +205,7 @@ fn service_entry(args: Vec<OsString>)
 		status_handle.set_service_status(next_status).unwrap();
 	}
 
+	let mut winlogon_pid = None;
 	unsafe
 	{
 		let max_byte_array_size = (512 * size_of::<u64>()) as u32;
@@ -191,9 +213,7 @@ fn service_entry(args: Vec<OsString>)
 		let mut actual_byte_array_size = u32::default();
 		if EnumProcesses(process_ids.as_mut_ptr(), max_byte_array_size, &mut actual_byte_array_size).is_err()
 		{
-			log_error_message("Could not enumerate processes to find instances of the core");
-			#[cfg_attr(debug_assertions, cfg(any()))]
-			update_service_status(&status_handle, ServiceState::Stopped, ServiceControlAccept::empty(), 0).unwrap();
+			bail_with_error("Could not enumerate processes to find instances of the core");
 		}
 		let num_processes = actual_byte_array_size / size_of::<u32>() as u32;
 		let pids = &process_ids[..num_processes as usize];
@@ -212,7 +232,7 @@ fn service_entry(args: Vec<OsString>)
 					{
 						// Certain system processes are protected and certain processes aren't normal processes even though they are assigned PIDs, (e.g., "Registry")
 						ACCESS_DENIED | INVALID_PARAMETER => { },
-						_ => info!("Couldn't open process PID {}: {:x} {}", pid, error.code().0, error.message())
+						_ => warn!("Couldn't open process PID {}: {:x} {}", pid, error.code().0, error.message())
 					}
 					continue;
 				}
@@ -235,14 +255,16 @@ fn service_entry(args: Vec<OsString>)
 			let name = slice_from_raw_parts(name_buffer.as_ptr(), name_size as usize);
 			let name = PathBuf::from(&OsString::from_wide(&*name));
 			let name = name.canonicalize().unwrap_or(name);
+			
+			// Might as well get the PID for winlogon while enumerating processes here.
+			// Under the assumption that there is one and only one instance running
+			// However, this is violated if the service starts before interactive logon or if there are multiple sessions
+			let winlogon_name = WINLOGON_PATH.lock().unwrap();
+			if (*winlogon_name).eq(&name) { winlogon_pid = Some(pid); }
+			
 			let name = name.file_name().unwrap_or_default();
 			let fsc_name = *FSC_CORE_NAME.lock().unwrap();
-			if fsc_name.eq(name)
-			{
-				let _ = TerminateProcess(process_handle, 0);
-				let _ = CloseHandle(process_handle);
-				continue;
-			}
+			if fsc_name.eq(name) { let _ = TerminateProcess(process_handle, 0); }
 			let _ = CloseHandle(process_handle);
 		}
 	}
@@ -250,29 +272,21 @@ fn service_entry(args: Vec<OsString>)
 	let pid;
 	unsafe
 	{
-		let current_process_handle = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, GetCurrentProcessId())
+		if winlogon_pid.is_none() { bail_with_error("Could not obtain PID for winlogon"); }
+		let winlogon_process_handle = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, winlogon_pid.unwrap())
 		{
 			Ok(handle) => handle,
-			Err(_) => { return; }
+			Err(_) => { bail_with_error("Could not open the winlogon process."); return; }
 		};
-		let mut candidate_token_handle = HANDLE::default();
-		let get_process_information = OpenProcessToken(current_process_handle, TOKEN_ALL_ACCESS, &mut candidate_token_handle);
+		let mut winlogon_token_handle = HANDLE::default();
+		let get_process_information = OpenProcessToken(winlogon_process_handle, TOKEN_ALL_ACCESS, &mut winlogon_token_handle);
 		if get_process_information.is_err() { exit(1); }
-		// I thought I needed to duplicate the token, but apparently not. I'll keep the comments in for now.
-		// let mut duplicated_token_handle = HANDLE::default();
-		// DuplicateTokenEx(candidate_token_handle, TOKEN_ACCESS_MASK(0), None, SecurityImpersonation, TokenImpersonation, &mut duplicated_token_handle).unwrap();
+		let mut duplicated_token_handle = HANDLE::default();
+		DuplicateTokenEx(winlogon_token_handle, TOKEN_ACCESS_MASK(0), None, SecurityImpersonation, TokenImpersonation, &mut duplicated_token_handle).unwrap();
 
 		let mut env = null_mut();
-		// let create_env = CreateEnvironmentBlock(&mut env, Some(duplicated_token_handle), false);
-		let create_env = CreateEnvironmentBlock(&mut env, Some(candidate_token_handle), false);
-		if create_env.is_err()
-		{
-			log_error_message("Error creating the environment block for the core");
-			#[cfg_attr(debug_assertions, cfg(any()))]
-			update_service_status(&status_handle, ServiceState::Stopped, ServiceControlAccept::empty(), 1).unwrap();
-			#[cfg_attr(not(debug_assertions), cfg(any()))]
-			TerminateProcess(GetCurrentProcess(), 1).unwrap();
-		}
+		let create_env = CreateEnvironmentBlock(&mut env, Some(duplicated_token_handle), false);
+		if create_env.is_err() { bail_with_error("Error creating the environment block for the core"); }
 
 		let creation_flags = CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW;
 		let startup_info = STARTUPINFOW
@@ -285,16 +299,8 @@ fn service_entry(args: Vec<OsString>)
 		let app_path = PCWSTR::from_raw(core_path.as_mut_ptr());
 
 		let mut process_info = PROCESS_INFORMATION::default();
-		// let create_process = CreateProcessAsUserW(Some(duplicated_token_handle), app_path, None, None, None, false, creation_flags, Some(env), PWSTR::null(), &startup_info, &mut process_info);
-		let create_process = CreateProcessAsUserW(Some(candidate_token_handle), app_path, None, None, None, false, creation_flags, Some(env), PWSTR::null(), &startup_info, &mut process_info);
-		if create_process.is_err()
-		{
-			log_error_message("Error creating the core process");
-			info!("Stopping service.");
-			#[cfg_attr(debug_assertions, cfg(any()))]
-			update_service_status(&status_handle, ServiceState::Stopped, ServiceControlAccept::empty(), 0).unwrap();
-			return;
-		}
+		let create_process = CreateProcessAsUserW(Some(duplicated_token_handle), app_path, None, None, None, false, creation_flags, Some(env), PWSTR::null(), &startup_info, &mut process_info);
+		if create_process.is_err() { bail_with_error("Error creating the core process"); return; }
 		pid = process_info.dwProcessId;
 		info!("Started the core with pid {}.", pid);
 	}

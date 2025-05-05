@@ -10,14 +10,21 @@
 
 param
 (
-	[Parameter()][string]$FileDescription = '',
+	[Parameter()][string]$FileDescription = 'FSC Service',
 	[Parameter()][System.Collections.Generic.HashSet[String]]$AdditionalOutputDirs
 )
-$name = 'Moo.FuckScreenConnect-rs'
-$version = (cargo.exe read-manifest --manifest-path .\Cargo.toml | ConvertFrom-Json).version
 $ErrorActionPreference = 'Stop'
 
-$env:BINARY_FILE_DESCRIPTION=$FileDescription
+$name = 'Moo.FuckScreenConnect-rs'
+$version_common = (cargo.exe read-manifest --manifest-path .\fsc_common\Cargo.toml | ConvertFrom-Json).version
+$version_service = (cargo.exe read-manifest --manifest-path .\fsc_service\Cargo.toml | ConvertFrom-Json).version
+$version_core = (cargo.exe read-manifest --manifest-path .\fsc_core\Cargo.toml | ConvertFrom-Json).version
+$bad_version = $false
+if ($version_common -ne $version_service) { $bad_version = $true }
+if ($version_core -ne $version_service) { $bad_version = $true }
+if ($bad_version) { Write-Error -Message "Package versions do not match. This is a bug and should be reported." }
+
+$env:BINARY_FILE_DESCRIPTION="$FileDescription"
 
 if ($Clean) { cargo.exe clean }
 if ($LASTEXITCODE -eq 0)

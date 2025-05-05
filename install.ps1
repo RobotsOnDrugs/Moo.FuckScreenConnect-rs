@@ -38,10 +38,10 @@ Write-Log -Level DEBUG -Message 'FSC functions script run.'
 Write-Log -Level INFO -Message 'Starting.'
 
 if (-not $ApplicationPath) { $ApplicationPath = $PWD.Path }
-$ApplicationPath = "$ApplicationPath", '\fsc_service.exe' -join ''
+$ApplicationPathService = "$ApplicationPath", '\fsc_service.exe' -join ''
 Write-Log -Level DEBUG -Message "$PWD"
-$is_absolute = [System.IO.Path]::IsPathRooted($ApplicationPath);
-if (!$is_absolute) { $ApplicationPath = "$PWD", "$ApplicationPath" -join '\' }
+$is_absolute = [System.IO.Path]::IsPathRooted($ApplicationPathService);
+if (!$is_absolute) { $ApplicationPath = "$PWD", "$ApplicationPathService" -join '\' }
 if (-not $ServiceName) { $ServiceName = "FSC Service" }
 if (-not $AutomaticStartup) { $AutomaticStartup = $false }
 switch ($Type)
@@ -49,7 +49,7 @@ switch ($Type)
 	'Install'
 	{
 		Write-Log -Level INFO -Message "Installing FSC."
-		Set-Installation $ServiceName $AutomaticStartup $ApplicationPath | Out-Null
+		Set-Installation $ServiceName $AutomaticStartup $ApplicationPathService | Out-Null
 		break
 	}
 	'Uninstall'

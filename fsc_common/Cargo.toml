@@ -1,6 +1,6 @@
 [package]
 name = "fsc_common"
-version = "0.4.0-pre2"
+version = "0.4.0-beta1"
 edition = "2024"
 
 [dependencies]
@@ -11,3 +11,6 @@ time = { version = "0.3", features = ["formatting"] }
 [dependencies.windows]
 version = "0.61"
 features = ["Win32_Foundation", "Win32_System_ProcessStatus", "Win32_System_Threading"]
+
+[build-dependencies]
+static_vcruntime = "2.0"

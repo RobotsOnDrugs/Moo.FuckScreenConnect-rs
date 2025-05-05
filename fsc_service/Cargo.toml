@@ -1,11 +1,9 @@
 [package]
 name = "fsc_service"
-version = "0.4.0-pre4"
+version = "0.4.0-beta1"
 edition = "2024"
 
 [dependencies]
-anyhow = "1.0"
-clap = "4.5"
 log = "0.4"
 once_cell = "1.21"
 simplelog = "0.12"
@@ -17,3 +15,8 @@ fsc_common = { path = "../fsc_common" }
 [dependencies.windows]
 version = "0.61"
 features = [ "Win32_Foundation", "Win32_Security", "Win32_System_Environment", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging" ]
+
+[build-dependencies]
+embed-manifest = "1.4"
+static_vcruntime = "2.0"
+winresource = "0.1"

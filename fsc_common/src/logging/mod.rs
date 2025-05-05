@@ -8,9 +8,11 @@ use std::io::Write;
 use std::os::windows::ffi::OsStringExt;
 
 use log::LevelFilter;
+
 use simplelog::Config;
 use simplelog::ConfigBuilder;
 use simplelog::format_description;
+
 use windows::Win32::Foundation::CloseHandle;
 use windows::Win32::System::ProcessStatus::GetModuleFileNameExW;
 use windows::Win32::System::Threading::GetCurrentProcessId;
