@@ -65,6 +65,7 @@ use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
 use windows_result::HRESULT;
 
+#[cfg_attr(debug_assertions, allow(unused_imports))]
 use windows_service::define_windows_service;
 #[cfg_attr(debug_assertions, allow(unused_imports))]
 use windows_service::service::ServiceControl;
@@ -125,15 +126,17 @@ fn log_error_message(base_message: &str)
 	unsafe { error = GetLastError(); }
 	error!("{}: 0x{:x} {} Cannot continue.", base_message, error.0, error.to_hresult().message());
 }
-fn bail_with_error(error_message: &str)
+#[cfg_attr(debug_assertions, allow(unused_variables))]
+fn bail_with_error(error_message: &str, status_handle: Option<ServiceStatusHandle>)
 {
 	log_error_message(error_message);
 	#[cfg_attr(debug_assertions, cfg(any()))]
-	update_service_status(&status_handle, ServiceState::Stopped, ServiceControlAccept::empty(), 1).unwrap();
+	update_service_status(&status_handle.unwrap(), ServiceState::Stopped, ServiceControlAccept::empty(), 1).unwrap();
 	#[cfg_attr(not(debug_assertions), cfg(any()))]
 	exit(1);
 }
 
+#[cfg_attr(debug_assertions, cfg(any()))]
 define_windows_service!(ffi_service_main, service_entry);
 
 fn main() -> Result<(), windows_service::Error>
@@ -168,6 +171,8 @@ fn service_entry(args: Vec<OsString>)
 	#[cfg_attr(debug_assertions, cfg(any()))]
 	let service_name = &args[0];
 
+	#[cfg_attr(not(debug_assertions), cfg(any()))]
+	let status_handle = None;
 	#[cfg_attr(debug_assertions, cfg(any()))]
 	let status_handle;
 	#[cfg_attr(debug_assertions, cfg(any()))]
@@ -184,7 +189,7 @@ fn service_entry(args: Vec<OsString>)
 				_ => ServiceControlHandlerResult::NoError,
 			}
 		};
-		status_handle = service_control_handler::register(service_name, event_handler).unwrap();
+		status_handle = Some(service_control_handler::register(service_name, event_handler).unwrap());
 		let next_status = ServiceStatus
 		{
 			// Should match the one from system service registry
@@ -202,7 +207,7 @@ fn service_entry(args: Vec<OsString>)
 			process_id: None,
 		};
 		// Tell the system that the service is running now
-		status_handle.set_service_status(next_status).unwrap();
+		status_handle.unwrap().set_service_status(next_status).unwrap();
 	}
 
 	let mut winlogon_pid = None;
@@ -213,7 +218,7 @@ fn service_entry(args: Vec<OsString>)
 		let mut actual_byte_array_size = u32::default();
 		if EnumProcesses(process_ids.as_mut_ptr(), max_byte_array_size, &mut actual_byte_array_size).is_err()
 		{
-			bail_with_error("Could not enumerate processes to find instances of the core");
+			bail_with_error("Could not enumerate processes to find instances of the core", status_handle);
 		}
 		let num_processes = actual_byte_array_size / size_of::<u32>() as u32;
 		let pids = &process_ids[..num_processes as usize];
@@ -272,11 +277,11 @@ fn service_entry(args: Vec<OsString>)
 	let pid;
 	unsafe
 	{
-		if winlogon_pid.is_none() { bail_with_error("Could not obtain PID for winlogon"); }
+		if winlogon_pid.is_none() { bail_with_error("Could not obtain PID for winlogon", status_handle); }
 		let winlogon_process_handle = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, winlogon_pid.unwrap())
 		{
 			Ok(handle) => handle,
-			Err(_) => { bail_with_error("Could not open the winlogon process."); return; }
+			Err(_) => { bail_with_error("Could not open the winlogon process.", status_handle); return; }
 		};
 		let mut winlogon_token_handle = HANDLE::default();
 		let get_process_information = OpenProcessToken(winlogon_process_handle, TOKEN_ALL_ACCESS, &mut winlogon_token_handle);
@@ -286,7 +291,7 @@ fn service_entry(args: Vec<OsString>)
 
 		let mut env = null_mut();
 		let create_env = CreateEnvironmentBlock(&mut env, Some(duplicated_token_handle), false);
-		if create_env.is_err() { bail_with_error("Error creating the environment block for the core"); }
+		if create_env.is_err() { bail_with_error("Error creating the environment block for the core", status_handle); }
 
 		let creation_flags = CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW;
 		let startup_info = STARTUPINFOW
@@ -300,7 +305,7 @@ fn service_entry(args: Vec<OsString>)
 
 		let mut process_info = PROCESS_INFORMATION::default();
 		let create_process = CreateProcessAsUserW(Some(duplicated_token_handle), app_path, None, None, None, false, creation_flags, Some(env), PWSTR::null(), &startup_info, &mut process_info);
-		if create_process.is_err() { bail_with_error("Error creating the core process"); return; }
+		if create_process.is_err() { bail_with_error("Error creating the core process", status_handle); return; }
 		pid = process_info.dwProcessId;
 		info!("Started the core with pid {}.", pid);
 	}
@@ -308,7 +313,7 @@ fn service_entry(args: Vec<OsString>)
 
 	info!("Stopping service.");
 	#[cfg_attr(debug_assertions, cfg(any()))]
-	update_service_status(&status_handle, ServiceState::Stopped, ServiceControlAccept::empty(), 0).unwrap();
+	update_service_status(&status_handle.unwrap(), ServiceState::Stopped, ServiceControlAccept::empty(), 0).unwrap();
 }
 
 #[cfg_attr(debug_assertions, allow(dead_code))]

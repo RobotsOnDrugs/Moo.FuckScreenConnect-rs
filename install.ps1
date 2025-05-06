@@ -18,9 +18,9 @@
 
 param
 (
-	[string]$ApplicationPath = $null,
+	[string]$ApplicationPath = "$env:PROGRAMFILES\FSC Service",
 	[string][ValidateSet('Install','Uninstall')]$Type = 'Install',
-	[string]$ServiceName = $null,
+	[string]$ServiceName = 'FSC Service',
 	[Switch]$AutomaticStartup,
 	[Switch]$ShowDebugMessages
 )
@@ -37,25 +37,21 @@ Write-Log -Level DEBUG -Message "Running PowerShell $($PSVersionTable.PSVersion)
 Write-Log -Level DEBUG -Message 'FSC functions script run.'
 Write-Log -Level INFO -Message 'Starting.'
 
-if (-not $ApplicationPath) { $ApplicationPath = $PWD.Path }
-$ApplicationPathService = "$ApplicationPath", '\fsc_service.exe' -join ''
-Write-Log -Level DEBUG -Message "$PWD"
-$is_absolute = [System.IO.Path]::IsPathRooted($ApplicationPathService);
-if (!$is_absolute) { $ApplicationPath = "$PWD", "$ApplicationPathService" -join '\' }
-if (-not $ServiceName) { $ServiceName = "FSC Service" }
+$is_absolute = [System.IO.Path]::IsPathRooted($ApplicationPath);
+if (!$is_absolute) { $ApplicationPath = "$PWD", "$ApplicationPath" -join '\' }
 if (-not $AutomaticStartup) { $AutomaticStartup = $false }
 switch ($Type)
 {
 	'Install'
 	{
-		Write-Log -Level INFO -Message "Installing FSC."
-		Set-Installation $ServiceName $AutomaticStartup $ApplicationPathService | Out-Null
+		Write-Log -Level INFO -Message 'Installing FSC.'
+		Set-Installation "$ServiceName" $AutomaticStartup "$ApplicationPath"
 		break
 	}
 	'Uninstall'
 	{
-		Write-Log -Level INFO -Message "Uninstalling FSC."
-		Remove-Installation $ServiceName
+		Write-Log -Level INFO -Message 'Uninstalling FSC.'
+		Remove-Installation "$ServiceName" "$ApplicationPath"
 		break
 	}
 	default { Write-Log -Level ERROR -Message "$Type is not a valid installation type." }
