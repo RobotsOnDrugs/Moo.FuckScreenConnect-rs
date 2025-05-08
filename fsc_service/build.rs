@@ -1,3 +1,4 @@
+use std::env;
 use embed_manifest::embed_manifest;
 use embed_manifest::new_manifest;
 use embed_manifest::manifest::ExecutionLevel;
@@ -11,11 +12,16 @@ fn main()
 	embed_manifest(manifest_builder).expect("Couldn't embed manifest.");
 	
 	let mut res = WindowsResource::new();
-	let file_description = std::env::var("BINARY_FILE_DESCRIPTION");
-	if let Ok(desc) = file_description
+	let file_description = env::var("BINARY_FILE_DESCRIPTION");
+	let git_version = env::var("GIT_VERSION");
+	if let Ok(ref desc) = file_description
 	{
-		res.set("FileDescription", desc.as_str());
-		res.set("ProductName", desc.as_str());
+		res.set("FileDescription", desc);
+		res.set("ProductName", desc);
+	};
+	if let Ok(ref git_version) = git_version
+	{
+		res.set("ProductVersion", git_version);
 	};
 	match res.compile()
 	{

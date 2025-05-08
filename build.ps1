@@ -1,11 +1,10 @@
-
 <#
-  .DESCRIPTION
-  Builds the FSC executable and prepares it for release. Final binaries will be copied to .\build and compressed to 7zip (LZMA) and zip archives.
-  .PARAMETER FileDescription <Description>
-  Optional; no metadata is set if unset. Specifies the value of FileDescription in the binary's manifest, which is what will displayed in Task Manager. Specifying this with something innocuous this is recommended in case a very suspicious scammer looks at Task Manager.
-  .PARAMETER AdditionalOutputDirs
-  Optional. An array of additional directories to copy binaries to. Must be absolute paths. Files copied to additional directories will not be packed into archives.
+	.DESCRIPTION
+		Builds the FSC executable and prepares it for release. Final binaries will be copied to .\build and compressed to 7zip (LZMA) and zip archives.
+	.PARAMETER FileDescription <Description>
+		Optional; no metadata is set if unset. Specifies the value of FileDescription in the binary's manifest, which is what will displayed in Task Manager. Specifying this with something innocuous this is recommended in case a very suspicious scammer looks at Task Manager.
+	.PARAMETER AdditionalOutputDirs
+		Optional. An array of additional directories to copy binaries to. Must be absolute paths. Files copied to additional directories will not be packed into archives.
 #>
 
 param
@@ -25,17 +24,20 @@ if ($version_core -ne $version_service) { $bad_version = $true }
 if ($bad_version) { Write-Error -Message "Package versions do not match. This is a bug and should be reported." }
 
 $env:BINARY_FILE_DESCRIPTION="$FileDescription"
+$git_commit_hash = Invoke-Expression 'git show HEAD --pretty=format:"%h" --no-patch'
+$env:GIT_VERSION ="${version_common}-${git_commit_hash}"
 
-if ($Clean) { cargo.exe clean }
 if ($LASTEXITCODE -eq 0)
 {
 	$new_path = '.\build'
 	$(Remove-Item -Recurse -Force -Path $new_path -ErrorAction SilentlyContinue) | Out-Null
 	$(New-Item -Force -Type Directory $new_path) | Out-Null
+	cargo.exe clean -p fsc_service -p fsc_core -p fsc_common
 	cargo.exe build
+	cargo.exe clean --release -p fsc_service -p fsc_core -p fsc_common
 	cargo.exe build --release
-	Copy-Item -Path '.\target\debug\fsc_core.exe' -Destination '.\build\fsc_core.exe'
-	Copy-Item -Path '.\target\debug\fsc_service.exe' -Destination '.\build\fsc_service.exe'
+	Copy-Item -Path '.\target\debug\fsc_core.exe' -Destination '.\build\fsc_core_debug.exe'
+	Copy-Item -Path '.\target\debug\fsc_service.exe' -Destination '.\build\fsc_service_debug.exe'
 	Copy-Item -Path '.\target\release\fsc_core.exe' -Destination '.\build\fsc_core.exe'
 	Copy-Item -Path '.\target\release\fsc_service.exe' -Destination '.\build\fsc_service.exe'
 	Copy-Item -Path '.\install.ps1' -Destination '.\build\install.ps1'
@@ -51,7 +53,6 @@ foreach ($additional_output_dir in $AdditionalOutputDirs)
 	$(Remove-Item -Recurse -Path $additional_output_dir -ErrorAction SilentlyContinue) | Out-Null
 	Copy-Item -Recurse '.' $additional_output_dir
 }
-$(Remove-Item -Force -Path test.7z -ErrorAction SilentlyContinue) | Out-Null
-7za a -t7z -m0=LZMA2 -mx9 -mmt8 -aoa "${name}.v${version}.7z" * | Out-Null
-7za a -tzip -m0=Deflate64 -mpass=15 -mfb=256 -mx9 -mmt8 -aoa "${name}.v${version}.zip" * | Out-Null
+7za a -t7z -m0=LZMA2 -mx9 -mmt8 -aoa "${name}.v${env:GIT_VERSION}.7z" * | Out-Null
+7za a -tzip -m0=Deflate64 -mpass=15 -mfb=256 -mx9 -mmt8 -aoa "${name}.v${env:GIT_VERSION}.zip" * | Out-Null
 Pop-Location

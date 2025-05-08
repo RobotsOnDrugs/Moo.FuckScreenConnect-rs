@@ -262,8 +262,6 @@ fn service_entry(args: Vec<OsString>)
 			let name = name.canonicalize().unwrap_or(name);
 			
 			// Might as well get the PID for winlogon while enumerating processes here.
-			// Under the assumption that there is one and only one instance running
-			// However, this is violated if the service starts before interactive logon or if there are multiple sessions
 			let winlogon_name = WINLOGON_PATH.lock().unwrap();
 			if (*winlogon_name).eq(&name) { winlogon_pid = Some(pid); }
 			
