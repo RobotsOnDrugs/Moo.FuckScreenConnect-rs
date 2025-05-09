@@ -4,16 +4,16 @@
 	.DESCRIPTION
 	Installs FuckScreenConnect either from the current directory or a specified path.
 	If there is an error, regardless of any options specified, the script will immediately halt and any issues must then be resolved manually.
-	.PARAMETER ApplicationPath
-		Optional; the current directory is used by default. Specifies the directory containing fsc_service.exe and fsc_core.exe.
+	.PARAMETER ApplicationPath [Path to custom directory]
+		Optional; defaults to the Program Files directory. If set, it will install to the custom directory specified.
 	.PARAMETER Type [Install | Uninstall]
 		Optional; defaults to Install. Installs or uninstalls the service.
-	.PARAMETER ServiceName
-		Optional; "FSC Service" by default. Specifies the name of the FSC service that will appear in e.g., the Services application or Task Manager.
-	.PARAMETER AutomaticStartup
-		Optional; false by default. If set, the service will be set to automatically start at boot. If unset, the service will not and can be started manually.
+	.PARAMETER ServiceName [Name]
+		Optional; defaults to "FSC Service". Specifies the name of the FSC service that will appear in e.g., the Services application or Task Manager.
+	.PARAMETER ManualStartup
+		Optional. If set, the service must be started or stopped manually. Otherwise, the service will start automatically at boot.
 	.PARAMETER ShowDebugMessages
-		Optional; unset by default. If set, debug messages are shown. Primarily meant for troubleshooting and developer use, and the messages shown are subject to change.
+		Optional. If set, debug messages are shown. Primarily meant for troubleshooting and developer use, and the messages shown are subject to change.
 #>
 
 param
@@ -21,7 +21,7 @@ param
 	[string]$ApplicationPath = "$env:PROGRAMFILES\FSC Service",
 	[string][ValidateSet('Install','Uninstall')]$Type = 'Install',
 	[string]$ServiceName = 'FSC Service',
-	[Switch]$AutomaticStartup,
+	[Switch]$ManualStartup,
 	[Switch]$ShowDebugMessages
 )
 
@@ -39,13 +39,13 @@ Write-Log -Level INFO -Message 'Starting.'
 
 $is_absolute = [System.IO.Path]::IsPathRooted($ApplicationPath);
 if (!$is_absolute) { $ApplicationPath = "$PWD", "$ApplicationPath" -join '\' }
-if (-not $AutomaticStartup) { $AutomaticStartup = $false }
+if ($ManualStartup) { $ManualStartup = $true }
 switch ($Type)
 {
 	'Install'
 	{
 		Write-Log -Level INFO -Message 'Installing FSC.'
-		Set-Installation "$ServiceName" $AutomaticStartup "$ApplicationPath"
+		Set-Installation "$ServiceName" $ManualStartup "$ApplicationPath"
 		break
 	}
 	'Uninstall'

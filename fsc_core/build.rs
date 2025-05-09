@@ -12,7 +12,7 @@ fn main()
 	embed_manifest(manifest_builder).expect("Couldn't embed manifest.");
 
 	let mut res = WindowsResource::new();
-	let file_description = std::env::var("BINARY_FILE_DESCRIPTION");
+	let file_description = env::var("BINARY_FILE_DESCRIPTION");
 	let git_version = env::var("GIT_VERSION");
 	if let Ok(ref desc) = file_description
 	{

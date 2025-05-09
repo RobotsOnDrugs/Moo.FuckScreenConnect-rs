@@ -19,12 +19,12 @@ function Get-InstallationStatus
 
 function Set-Installation
 {
-	param([string]$service_name, [bool]$is_automatic, [string]$path)
+	param([string]$service_name, [bool]$is_manual, [string]$path)
 	$clean = ((Get-InstallationStatus "$service_name") -eq [ExistingInstallationStatus]::None)
 	if (!$clean) { Remove-Installation "$service_name" "$path" }
 	Write-Log -Level INFO -Message "Installing $service_name."
-	if ($is_automatic) { $start_type = 'AutomaticDelayedStart' }
-	else { $start_type = 'Manual' }
+	if ($is_manual) { $start_type = 'Manual' }
+	else { $start_type = 'Automatic' }
 	New-Item -ItemType Directory -Path "$path" -Force | Out-Null
 	Copy-Item '.\fsc_service.exe' "$path"
 	Copy-Item '.\fsc_core.exe' "$path"
@@ -32,10 +32,9 @@ function Set-Installation
 	New-Service -Name "$service_name" -BinaryPathName "`"$service_path`" `"$service_name`"" -DisplayName "$service_name" -StartupType $start_type | Out-Null
 	$status = (Get-InstallationStatus $service_name)
 	if ($status -ne [ExistingInstallationStatus]::Normal) { Stop-ScriptWithError -ErrorMessage "Could not create service $service_name." }
-	Start-Service -Name "$service_name" | Out-Null
+	if (-not $is_manual) { Start-Service -Name "$service_name" | Out-Null }
 	$start_status = (Get-Service -Name "$service_name").Status
 	Write-Log -Level DEBUG "Start status: $start_status"
-	if (!$start_status.Equals([System.ServiceProcess.ServiceControllerStatus]::Running)) { Stop-ScriptWithError -ErrorMessage "Could not start service $service_name." }
 
 	return Get-InstallationStatus $service_name
 }
