@@ -25,8 +25,10 @@ param
 	[Switch]$ShowDebugMessages
 )
 
-$compatible = ($PSVersionTable.PSVersion.Major -eq 5) -and ($PSVersionTable.PSVersion.Minor -eq 1);
-if (-not $compatible) { Write-Error "This script must be run with PowerShell 5.1 and is not tested on other versions." }
+# Should be compatible with PowerShell 7 now, but there may be issues automatically installing the logging module
+# Might change logging module to PSLogs or such later on
+#$compatible = ($PSVersionTable.PSVersion.Major -eq 5) -and ($PSVersionTable.PSVersion.Minor -eq 1);
+#if (-not $compatible) { Write-Error "This script must be run with PowerShell 5.1 and is not tested on other versions." }
 
 $ErrorActionPreference = 'Stop'
 

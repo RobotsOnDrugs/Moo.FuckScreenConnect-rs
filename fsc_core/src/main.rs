@@ -1,24 +1,22 @@
 #![deny(clippy::implicit_return)]
 #![allow(clippy::needless_return)]
-#![cfg_attr(all(target_os = "windows"), windows_subsystem = "windows")]
-#![cfg_attr(debug_assertions, allow(unused_imports))]
+#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 
-mod service;
 mod process_state;
 
 use std::env;
 use std::process::exit;
 use std::str::FromStr;
+use std::sync::LazyLock;
 use std::sync::Mutex;
 use std::thread::sleep;
 use std::time::Duration;
-
-use once_cell::sync::Lazy;
 
 use log::info;
 use log::LevelFilter;
 use log::warn;
 
+use simplelog::CombinedLogger;
 use simplelog::WriteLogger;
 
 use windows::core::BOOL;
@@ -54,12 +52,21 @@ const DEFAULT_OPACITY: isize = 50;
 const SCREENCONNECT_MODULE_NAME: &str = "ScreenConnect.WindowsClient.exe";
 const REMOTE_UTILITIES_MODULE_NAME: &str = "rfusclient.exe";
 
-static HWND_PTR: Lazy<Mutex<usize>> = Lazy::new(|| return Mutex::new(HWND::default().0 as usize));
-static SHOULD_CONTINUE: Lazy<Mutex<bool>> = Lazy::new(|| return Mutex::new(true));
+static HWND_PTR: LazyLock<Mutex<usize>> = LazyLock::new(|| return Mutex::new(HWND::default().0 as usize));
+static SHOULD_CONTINUE: LazyLock<Mutex<bool>> = LazyLock::new(|| return Mutex::new(true));
 
 fn main()
 {
-	let _ = WriteLogger::init(LevelFilter::Info, get_default_config(), get_default_file());
+	let wl = WriteLogger::new(LevelFilter::Info, get_default_config(), get_default_file());
+	cfg_select!
+	{
+		debug_assertions =>
+		{
+			let tl = simplelog::TermLogger::new(LevelFilter::Debug, get_default_config(), simplelog::TerminalMode::Mixed, simplelog::ColorChoice::Auto);
+			CombinedLogger::init(vec![wl, tl]).expect("Couldn't initiate combined logger.");
+		}
+		_ => { CombinedLogger::init(vec![wl]).expect("Couldn't initiate write logger."); }
+	};
 	
 	ctrlc::set_handler(||
 	{
@@ -67,7 +74,7 @@ fn main()
 		*SHOULD_CONTINUE.lock().unwrap() = false;
 	}).unwrap();
 
-	#[cfg(any())]
+	#[cfg(false)]
 	unsafe
 	{
 		// Some WIP code for an upcoming feature to check if it's running as SYSTEM in the interactive session
@@ -124,25 +131,24 @@ fn main()
 	while *SHOULD_CONTINUE.lock().unwrap()
 	{
 		unsafe { let _ = EnumWindows(Some(fsc), LPARAM(opacity)); }
-		sleep(Duration::from_millis(50));
+		sleep(Duration::from_millis(100));
 	}
 	info!("Exiting.");
 	exit(0);
 }
 
-#[allow(unsafe_op_in_unsafe_fn)]
-unsafe extern "system" fn fsc(hwnd: HWND, opacity: LPARAM) -> BOOL
+extern "system" fn fsc(hwnd: HWND, opacity: LPARAM) -> BOOL
 {
 	let mut this_window_info = WINDOWINFO::default();
-	GetWindowInfo(hwnd, &mut this_window_info).unwrap();
+	unsafe { GetWindowInfo(hwnd, &mut this_window_info).unwrap(); }
 	let mut desktop_window_info = WINDOWINFO::default();
-	let desktop_hwnd = GetDesktopWindow();
-	GetWindowInfo(desktop_hwnd, &mut desktop_window_info).unwrap();
+	let desktop_hwnd = unsafe { GetDesktopWindow() };
+	unsafe { GetWindowInfo(desktop_hwnd, &mut desktop_window_info).unwrap(); }
 	if this_window_info.rcWindow.ne(&desktop_window_info.rcWindow) { return BOOL::from(true); }
-	
+
 	let mut pid = u32::default();
-	let _ = GetWindowThreadProcessId(hwnd, Some(&mut pid));
-	let process_handle = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	let _ = unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+	let process_handle = match unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }
 	{
 		Ok(handle) => handle,
 		Err(err) =>
@@ -152,8 +158,8 @@ unsafe extern "system" fn fsc(hwnd: HWND, opacity: LPARAM) -> BOOL
 		}
 	};
 	let mut process_name: [u16; 256] = [0; 256];
-	let process_name_size = GetModuleFileNameExW(process_handle.into(), None, &mut process_name);
-	let _ = CloseHandle(process_handle);
+	let process_name_size = unsafe { GetModuleFileNameExW(process_handle.into(), None, &mut process_name) };
+	let _ = unsafe { CloseHandle(process_handle) };
 	let process_name = &process_name[0..process_name_size as usize];
 	let process_name = String::from_utf16_lossy(process_name);
 	let process_name = process_name.split('\\').next_back().unwrap_or("");
@@ -166,18 +172,18 @@ unsafe extern "system" fn fsc(hwnd: HWND, opacity: LPARAM) -> BOOL
 	let mut last_hwnd = HWND_PTR.lock().unwrap();
 	if *last_hwnd == (hwnd.0 as _) { return BOOL::from(true); }
 	
-	let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+	let style = unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) };
 	let style = WINDOW_STYLE(style as u32);
-	let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+	let ex_style = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) };
 	let ex_style = WINDOW_EX_STYLE(ex_style as u32);
 	let is_layered = ex_style == (ex_style | WS_EX_LAYERED);
 	let is_visible = style == (style | WS_VISIBLE);
 	if !is_visible && !is_layered { return BOOL::from(true); }
 	let new_ex_style = ex_style | WS_EX_LAYERED;
-	let _ = SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_ex_style.0 as isize);
+	let _ = unsafe { SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_ex_style.0 as isize) };
 	let opacity = opacity.0;
 	let opacity = (255 * opacity / 100) as u8;
-	match SetLayeredWindowAttributes(hwnd, COLORREF::default(), opacity, LWA_ALPHA)
+	match unsafe { SetLayeredWindowAttributes(hwnd, COLORREF::default(), opacity, LWA_ALPHA) }
 	{
 		Ok(_) => info!("Made the {} privacy window semi-transparent.", friendly_name),
 		Err(err) => warn!("Failed to make the privacy window semi-transparent: screen {err}")

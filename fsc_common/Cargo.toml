@@ -1,16 +1,16 @@
 [package]
 name = "fsc_common"
-version = "0.4.0"
+version.workspace = true
 edition = "2024"
 
 [dependencies]
-log = "0.4"
-simplelog = "0.12"
-time = { version = "0.3", features = ["formatting"] }
+log.workspace = true
+simplelog.workspace = true
+time.workspace = true
 
 [dependencies.windows]
-version = "0.61"
+workspace = true
 features = ["Win32_Foundation", "Win32_System_ProcessStatus", "Win32_System_Threading"]
 
 [build-dependencies]
-static_vcruntime = "2.0"
+static_vcruntime.workspace = true

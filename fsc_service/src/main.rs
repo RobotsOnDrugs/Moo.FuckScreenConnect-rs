@@ -1,6 +1,6 @@
 #![deny(clippy::implicit_return)]
 #![allow(clippy::needless_return)]
-#![cfg_attr(all(target_os = "windows"), windows_subsystem = "windows")]
+#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 
 use std::env;
 use std::env::args;
@@ -14,6 +14,7 @@ use std::process::exit;
 use std::ptr::null_mut;
 use std::ptr::slice_from_raw_parts;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::sync::Mutex;
 use std::thread::sleep;
 use std::time::Duration;
@@ -22,8 +23,6 @@ use log::error;
 use log::info;
 use log::warn;
 use log::LevelFilter;
-
-use once_cell::sync::Lazy;
 
 use simplelog::WriteLogger;
 
@@ -84,9 +83,9 @@ use fsc_common::logging::get_default_config;
 use fsc_common::logging::get_default_file;
 
 
-static SHOULD_CONTINUE: Lazy<Mutex<bool>> = Lazy::new(|| return Mutex::new(true));
+static SHOULD_CONTINUE: LazyLock<Mutex<bool>> = LazyLock::new(|| return Mutex::new(true));
 
-static WINLOGON_PATH: Lazy<Mutex<PathBuf>> = Lazy::new(||
+static WINLOGON_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(||
 {
 	let system_root_path = env::var_os("SystemRoot").unwrap();
 	let mut winlogon_path = PathBuf::from(system_root_path);
@@ -94,19 +93,19 @@ static WINLOGON_PATH: Lazy<Mutex<PathBuf>> = Lazy::new(||
 	winlogon_path.push("winlogon.exe");
 	return Mutex::new(winlogon_path.canonicalize().unwrap());
 });
-static FSC_CORE_NAME: Lazy<Mutex<&OsStr>> = Lazy::new(|| return Mutex::new(OsStr::new("fsc_core.exe")));
-static FSC_CORE_PATH_BYTES: Lazy<Mutex<Arc<[u16]>>> = Lazy::new(||
+static FSC_CORE_NAME: LazyLock<Mutex<&OsStr>> = LazyLock::new(|| return Mutex::new(OsStr::new("fsc_core.exe")));
+static FSC_CORE_PATH_BYTES: LazyLock<Mutex<Arc<[u16]>>> = LazyLock::new(||
 {
 	let fsc_dir = FSC_DIR_PATH.lock().unwrap();
 	let core_path = fsc_dir.join(Path::new(*FSC_CORE_NAME.lock().unwrap()));
 	return Mutex::new(path_buf_to_wide(core_path.to_owned()));
 });
-static FSC_DIR_PATH_BYTES: Lazy<Mutex<Arc<[u16]>>> = Lazy::new(||
+static FSC_DIR_PATH_BYTES: LazyLock<Mutex<Arc<[u16]>>> = LazyLock::new(||
 {
 	let fsc_dir = FSC_DIR_PATH.lock().unwrap();
 	return Mutex::new(path_buf_to_wide(fsc_dir.to_owned()));
 });
-static FSC_DIR_PATH: Lazy<Mutex<PathBuf>> = Lazy::new(||
+static FSC_DIR_PATH: LazyLock<Mutex<PathBuf>> = LazyLock::new(||
 {
 	let current_exe_path = env::current_exe().unwrap();
 	let current_dir = current_exe_path.parent().unwrap();
@@ -130,13 +129,13 @@ fn log_error_message(base_message: &str)
 fn bail_with_error(error_message: &str, status_handle: Option<ServiceStatusHandle>)
 {
 	log_error_message(error_message);
-	#[cfg_attr(debug_assertions, cfg(any()))]
+	#[cfg_attr(debug_assertions, cfg(false))]
 	update_service_status(&status_handle.unwrap(), ServiceState::Stopped, ServiceControlAccept::empty(), 1).unwrap();
-	#[cfg_attr(not(debug_assertions), cfg(any()))]
+	#[cfg_attr(not(debug_assertions), cfg(false))]
 	exit(1);
 }
 
-#[cfg_attr(debug_assertions, cfg(any()))]
+#[cfg_attr(debug_assertions, cfg(false))]
 define_windows_service!(ffi_service_main, service_entry);
 
 fn main() -> Result<(), windows_service::Error>
@@ -150,7 +149,7 @@ fn main() -> Result<(), windows_service::Error>
 		Some(service_name) => service_name
 	};
 	info!("service_name: {service_name}");
-	#[cfg_attr(debug_assertions, cfg(any()))]
+	#[cfg_attr(debug_assertions, cfg(false))]
 	windows_service::service_dispatcher::start(service_name, ffi_service_main)?;
 	#[cfg(debug_assertions)]
 	service_entry(Vec::new());
@@ -163,19 +162,19 @@ fn service_entry(args: Vec<OsString>)
 	info!("Starting service.");
 
 	#[cfg_attr(debug_assertions, allow(unused_variables))]
-	#[cfg_attr(not(debug_assertions), cfg(any()))]
+	#[cfg_attr(not(debug_assertions), cfg(false))]
 	let _ = args;
 	
 	// Currently, the only way to figure out the service name for the status handle is to have it as a command line argument
 	// Maybe it'll enumerate services and properly find itself one day
-	#[cfg_attr(debug_assertions, cfg(any()))]
+	#[cfg_attr(debug_assertions, cfg(false))]
 	let service_name = &args[0];
 
-	#[cfg_attr(not(debug_assertions), cfg(any()))]
+	#[cfg_attr(not(debug_assertions), cfg(false))]
 	let status_handle = None;
-	#[cfg_attr(debug_assertions, cfg(any()))]
+	#[cfg_attr(debug_assertions, cfg(false))]
 	let status_handle;
-	#[cfg_attr(debug_assertions, cfg(any()))]
+	#[cfg_attr(debug_assertions, cfg(false))]
 	{
 		let event_handler = move |control_event| -> ServiceControlHandlerResult
 		{
@@ -235,7 +234,7 @@ fn service_entry(args: Vec<OsString>)
 					const INVALID_PARAMETER: i32 = HRESULT::from_win32(ERROR_INVALID_PARAMETER.0).0;
 					match error.code().0
 					{
-						// Certain system processes are protected and certain processes aren't normal processes even though they are assigned PIDs, (e.g., "Registry")
+						// Certain system processes are protected, and certain processes aren't normal processes even though they are assigned PIDs, (e.g., "Registry")
 						ACCESS_DENIED | INVALID_PARAMETER => { },
 						_ => warn!("Couldn't open process PID {}: {:x} {}", pid, error.code().0, error.message())
 					}
@@ -310,7 +309,7 @@ fn service_entry(args: Vec<OsString>)
 	watch_core(pid);
 
 	info!("Stopping service.");
-	#[cfg_attr(debug_assertions, cfg(any()))]
+	#[cfg_attr(debug_assertions, cfg(false))]
 	update_service_status(&status_handle.unwrap(), ServiceState::Stopped, ServiceControlAccept::empty(), 0).unwrap();
 }
 

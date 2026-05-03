@@ -15,17 +15,12 @@ param
 $ErrorActionPreference = 'Stop'
 
 $name = 'Moo.FuckScreenConnect-rs'
-$version_common = (cargo.exe read-manifest --manifest-path .\fsc_common\Cargo.toml | ConvertFrom-Json).version
-$version_service = (cargo.exe read-manifest --manifest-path .\fsc_service\Cargo.toml | ConvertFrom-Json).version
-$version_core = (cargo.exe read-manifest --manifest-path .\fsc_core\Cargo.toml | ConvertFrom-Json).version
-$bad_version = $false
-if ($version_common -ne $version_service) { $bad_version = $true }
-if ($version_core -ne $version_service) { $bad_version = $true }
-if ($bad_version) { Write-Error -Message "Package versions do not match. This is a bug and should be reported." }
+$fsc_version = (cargo.exe read-manifest --manifest-path .\fsc_common\Cargo.toml | ConvertFrom-Json).version
+Write-Output "Building version $fsc_version"
 
 $env:BINARY_FILE_DESCRIPTION="$FileDescription"
 $git_commit_hash = Invoke-Expression 'git show HEAD --pretty=format:"%h" --no-patch'
-$env:GIT_VERSION ="${version_common}-${git_commit_hash}"
+$env:GIT_VERSION ="${fsc_version}-${git_commit_hash}"
 
 if ($LASTEXITCODE -eq 0)
 {

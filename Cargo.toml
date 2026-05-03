@@ -1,6 +1,23 @@
 [workspace]
 members = ["fsc_core", "fsc_service", "fsc_common"]
 resolver = "2"
+package.version = "0.4.1"
+package.license = "MIT"
+
+[workspace.dependencies]
+anyhow = "~1.0.102"
+ctrlc = "~3.5.2"
+embed-manifest = "~1.5.0"
+log = "~0.4.29"
+simplelog = "~0.12.2"
+static_vcruntime = "~3.0.0"
+time = { version = "~0.3", features = ["formatting"] }
+windows = "0.62.2"
+windows-result = "~0.4"
+windows-service = "~0.8"
+winresource = "~0.1"
+
+fsc_common = { path = "fsc_common" }
 
 [profile.release]
 strip = true

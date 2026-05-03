@@ -9,7 +9,7 @@ function Get-InstallationStatus
 {
 	param([string]$service_name)
 	Write-Log -Level DEBUG -Message "Getting installation status for $service_name."
-	$service = Get-WmiObject win32_service | Where-Object {$_.Name -eq $service_name}
+	$service = Get-CimInstance win32_service | Where-Object {$_.Name -eq $service_name}
 	if ($null -eq $service) { Write-Log -Level DEBUG -Message "Installation status of ${service_name}: None"; return [ExistingInstallationStatus]::None }
 	Write-Log -Level DEBUG -Message ("$($service.PathName)" -replace " `"$service_name`"" -replace '"')
 	if (!(Test-Path -Path ("$($service.PathName)" -Replace " `"$service_name`"" -replace '"'))) { Write-Log -Level DEBUG -Message "Installation status of ${service_name}: Broken"; return [ExistingInstallationStatus]::Broken }
@@ -21,7 +21,7 @@ function Set-Installation
 {
 	param([string]$service_name, [bool]$is_manual, [string]$path)
 	$clean = ((Get-InstallationStatus "$service_name") -eq [ExistingInstallationStatus]::None)
-	if (!$clean) { Remove-Installation "$service_name" "$path" }
+	if (-not $clean) { Remove-Installation "$service_name" "$path" }
 	Write-Log -Level INFO -Message "Installing $service_name."
 	if ($is_manual) { $start_type = 'Manual' }
 	else { $start_type = 'Automatic' }

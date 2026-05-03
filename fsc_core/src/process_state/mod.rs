@@ -33,24 +33,21 @@ pub enum ProcessState
 #[allow(dead_code)]
 pub fn determine_process_state() -> ProcessState
 {
-	unsafe
+	let current_process_handle = unsafe { GetCurrentProcess() };
+	let mut token_handle = HANDLE::default();
+	unsafe { OpenProcessToken(current_process_handle, TOKEN_QUERY, &mut token_handle).unwrap(); }
+	let is_system = is_system_token(token_handle);
+	let is_interactive = is_interactive();
+	let process_state = match (is_system, is_interactive)
 	{
-		let current_process_handle = GetCurrentProcess();
-		let mut token_handle = HANDLE::default();
-		OpenProcessToken(current_process_handle, TOKEN_QUERY, &mut token_handle).unwrap();
-		let is_system = is_system_token(token_handle);
-		let is_interactive = is_interactive();
-		let process_state = match (is_system, is_interactive)
-		{
-			(true, true) => InteractiveSystem,
-			(true, false) => ProcessState::System,
-			(false, true) => User,
-			(false, false) => OtherService,
-		};
-		let _ = CloseHandle(current_process_handle);
-		let _ = CloseHandle(token_handle);
-		return process_state;
-	}
+		(true, true) => InteractiveSystem,
+		(true, false) => ProcessState::System,
+		(false, true) => User,
+		(false, false) => OtherService,
+	};
+	let _ = unsafe { CloseHandle(current_process_handle) };
+	let _ = unsafe { CloseHandle(token_handle) };
+	return process_state;
 }
 
 /// Determines if the process is running as the SYSTEM account. Does not close the token handle.
